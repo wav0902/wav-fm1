@@ -33,13 +33,9 @@ static struct {
 } voice[NV];
 static volatile uint32_t bend_q16 = 65536;      /* the pitch wheel: the steps times this / 65536 */
 
-static int32_t sine(uint32_t ph)                /* a full cycle over 2^32 -> -32767..32767 (a refined parabola, ~0.1 %) */
+static int32_t sine(uint32_t ph)
 {
-    int32_t x = (int32_t)ph >> 16, ax = x < 0 ? -x : x, y, ay;
-    y = (x * (32768 - ax)) >> 13;               /* 4x(1-|x|), Q15 */
-    ay = y < 0 ? -y : y;
-    y += ((((y * ay) >> 15) - y) * 7373) >> 15; /* + 0.225 (y|y| - y) */
-    return y > 32767 ? 32767 : y < -32767 ? -32767 : y;
+    return (int32_t)(ph >> 16) - 32768;
 }
 
 static void app_audio(int32_t *out, uint32_t n)
