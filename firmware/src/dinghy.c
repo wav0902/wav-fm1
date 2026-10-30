@@ -83,8 +83,8 @@ static int16_t dl[65536] __attribute__((section(".pool")));
 static uint32_t dpos, dlen = 18042u;
 static int32_t dlp;
 
-static uint32_t rng = 2463534242u;
-static uint32_t rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
+static uint32_t a_seed = 2463534242u;
+static uint32_t rnd(void) { a_seed ^= a_seed << 13; a_seed ^= a_seed >> 17; a_seed ^= a_seed << 5; return a_seed; }
 
 static struct {                                 /* the line (touched only by the ISR) */
     uint32_t ph, ph2, inc, inc_t, inc2, tick, pos, trig;
