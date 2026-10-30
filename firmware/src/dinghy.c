@@ -1,301 +1,383 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Dinghy: the smallest FM-1 firmware to build your own on. A sine wave on the keys, and that is all.
- * This is the file to change. Everything below it (platform.c) is done: updates, the USB rescue,
- * MIDI (USB, the TRS jack), USB audio, keys, knobs, LEDs, the screen, flash storage; the FM-1 and the SMK-37.
+/* ACID: a two-voice minimal synth for the FM-1, built on Dinghy. No presets, no saves: switch on, a raw saw, turn the knobs.
  *
- *   keys       play sines, 4 voices; the notes go out over USB-MIDI too, on the MIDI channel
- *   OCT- OCT+  the octave (kept in flash)
- *   PRESETS    the MIDI channel: OMNI (in: all, out: 1) or 1..16 (kept in flash)
- *   MASTER     the volume (platform.c)
- *   MIDI in    notes from USB or the TRS jack play the sines, with their velocity; a MIDI clock shows its tempo
- *              and blinks PLAY on the beat, START / STOP light it
- *   SMK-37     the keys with velocity, the outer keys too, the pads (white keys F3..G5, lit while they sound), the
- *              pitch wheel bends +-2 semitones
+ *   KEYS (all 27)       they play the voice PRESETS picked.
+ *   LEAD                hold a chord and let go: the arpeggiator keeps going (latch). A fresh press after letting go replaces it.
+ *   BASS                a drone: it rings until you press another key (HOME stops it). Moog-like, saturated, deep.
+ *   PRESETS             left: the LEAD, right: the BASS (keys, knobs and volume act on that voice)
+ *   KNOB 1..4           page A: CUTOFF, RESONANCE, ENV MOD, DECAY (303 style)
+ *                       page B: DRIVE, GLIDE, DETUNE, DELAY       (FX switches the page). Turn fast: bigger steps.
+ *   ALGORITHM           the volume of the picked voice          SELECT   tempo          MASTER   the original master volume
+ *   ARP                 the next arpeggio pattern: UP, DOWN, UP-DN, RANDOM, OCT, CONV, DOUBLE, ZIGZAG
+ *   PLAY                lead start / stop       HOME   stop the lead and the bass       OCT- OCT+   octave
  *
- * Rules of the road (the chip has no FPU and no libgcc): integers only, no float, no 64-bit division.
- * tests/host.c runs this file on a computer: the screen as a PNG, the sound as a WAV.
- * What platform.c offers: docs/API.md. The chip's rules: docs/RULES.md. */
-static void app_idle(void);
-#define LCD_IDLE app_idle                       /* while the screen's DMA runs: MIDI in (platform.c) */
+ * Integers only (no FPU, no libgcc). The tables are in acid_tables.h. */
+#define APP_NAME "ACID"
+static void app_idle(void) {}
+#define LCD_IDLE app_idle
 #include "platform.c"
-#if BOARD_SMK37
-#include "smk_wheel.h"
-#endif
+#include "acid_tables.h"
+#define KEY0 53u                                /* key 0 = F3 */
 
-/* ---- the sound (runs in the audio ISR: keep it short, no flash, no screen) */
-#define NV 4u                                   /* voices */
-static struct {
-    volatile uint32_t inc;                      /* phase step per frame: f * 2^32 / 44100 (unbent) */
-    volatile int32_t gate;                      /* target level, Q15: 0 = released */
-    int32_t amp;                                /* the level now: glides to gate, no clicks */
-    uint32_t ph, age;
-    uint8_t note;
-} voice[NV];
-static volatile uint32_t bend_q16 = 65536;      /* the pitch wheel: the steps times this / 65536 */
+/* ---- shared with the audio ISR: one writer each (docs/RULES.md) */
+static volatile uint32_t a_mask;                /* latched lead keys: bit k = key k */
+static volatile uint32_t seq_cur = 255u;        /* the key the arpeggiator plays now (for the LEDs) */
+static volatile uint32_t a_run = 1, a_mode;
+static volatile uint32_t step_len = 6014u, gate_len = 3608u;   /* frames per 16th, frames the gate stays open */
+static volatile int32_t oct_sh;                 /* -1..1 */
+/* LEAD P[0..7], BASS P[8..15]: cutoff, reso, env mod, decay | drive, glide, detune, delay send */
+static volatile uint32_t P[16] = {36, 90, 70, 40, 0, 0, 0, 0, 52, 55, 90, 35, 0, 0, 8, 0};
+static volatile uint32_t VOL[2] = {127, 127};   /* lead, bass */
+static volatile uint32_t b_inc, b_trig;
+static volatile int32_t b_gate;
 
-static int32_t sine(uint32_t ph)
+static const uint32_t INC_C9[12] = {            /* MIDI 120..131 (C9..B9); lower octaves shift right */
+    815363807u, 863847862u, 915214929u, 969636441u, 1027294024u, 1088380105u,
+    1153098554u, 1221665363u, 1294309365u, 1371273005u, 1452813141u, 1539201906u};
+static uint32_t note_inc(uint32_t note) { return INC_C9[note % 12u] >> (10u - note / 12u); }
+
+/* ---- the sound */
+typedef struct { int32_t low, band; } svf_t;
+
+static int32_t svf(svf_t *s, int32_t in, int32_t f, int32_t q)   /* Chamberlin state-variable low-pass */
 {
-    return (int32_t)(ph >> 16) - 32768;
+    int32_t high;
+    s->low += (int32_t)(((int64_t)f * s->band) >> 15);
+    high = in - s->low - (int32_t)(((int64_t)q * s->band) >> 15);
+    s->band += (int32_t)(((int64_t)f * high) >> 15);
+    if (s->band > 262143) s->band = 262143; else if (s->band < -262143) s->band = -262143;
+    if (s->low > 262143) s->low = 262143; else if (s->low < -262143) s->low = -262143;
+    return s->low;
+}
+
+static int32_t soft(int32_t x)                  /* cubic soft clip: x - x^3 / 3 */
+{
+    int32_t t;
+    if (x > 32767) x = 32767; else if (x < -32767) x = -32767;
+    t = (int32_t)(((int64_t)x * x) >> 15);
+    t = (int32_t)(((int64_t)t * x) >> 15);
+    return x - ((t * 10923) >> 15);
+}
+
+static int32_t resq(uint32_t r)                 /* damping: nearly flat up to the middle, then it squeals */
+{
+    int32_t r2 = (int32_t)((r * r) >> 7);       /* 0..126 */
+    return 52000 - r2 * 388;
+}
+static int32_t env2(int32_t e)                  /* a sharper pluck: the envelope squared, 0..126 */
+{
+    int32_t x = e >> 8;
+    return (x * x) >> 7;
+}
+
+static uint32_t glide(uint32_t cur, uint32_t tgt, uint32_t g)   /* the phase step slides to its target (per block) */
+{
+    int32_t d;
+    if (!g || !cur) return tgt;
+    d = (int32_t)cur - (int32_t)tgt;
+    return (uint32_t)((int32_t)tgt + (int32_t)(((int64_t)d * DEC_K[g >> 1]) >> 15));
+}
+
+#define DMASK 65535u                            /* one delay line of 1.5 s, shared by the lead and the bass (the pool) */
+static int16_t dl[65536] __attribute__((section(".pool")));
+static uint32_t dpos, dlen = 18042u;
+static int32_t dlp;
+
+static uint32_t rng = 2463534242u;
+static uint32_t rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
+
+static struct {                                 /* the line (touched only by the ISR) */
+    uint32_t ph, ph2, inc, inc_t, inc2, tick, pos, trig;
+    int32_t gate, amp, tgt, env_f, env_a, f, q;
+    svf_t sv, sv2;
+} A;
+static struct {                                 /* the bass */
+    uint32_t ph1, ph2, ph3, seen, inc, inc_t, inc2;
+    int32_t amp, env, f, q;
+    svf_t sv, sv2;
+} B;
+
+static void fire(uint32_t key, uint32_t up)     /* the lead plays a key (+ up semitones): pitch, gate, envelopes */
+{
+    A.inc_t = note_inc((uint32_t)((int32_t)(KEY0 + key) - 12 + 12 * oct_sh) + up);
+    if (!P[5]) A.inc = A.inc_t;                 /* no glide: the new pitch at once */
+    A.gate = 1;
+    A.env_f = 32767;
+    A.env_a = 32767;
+}
+
+static void arp_step(void)                      /* pick the next note of the latched chord, 2 octaves */
+{
+    uint32_t m = a_mask, n = 0, t = m, total, p, j, k;
+    if (!m) return;
+    while (t) { n += t & 1u; t >>= 1; }
+    total = n * 2u;
+    switch (a_mode) {
+    case 1:  p = total - 1u - A.pos % total; break;
+    case 2: {
+        uint32_t per = total > 1u ? 2u * total - 2u : 1u, q = A.pos % per;
+        p = q < total ? q : per - q;
+        break; }
+    case 3:  p = rnd() % total; break;
+    case 4: { uint32_t i = A.pos % (2u * n); p = i / 2u + (i & 1u) * n; break; }                 /* each note, then its octave */
+    case 5: { uint32_t i = A.pos % total; p = (i & 1u) ? total - 1u - i / 2u : i / 2u; break; }    /* converge: low, high, 2nd low ... */
+    case 6:  p = (A.pos / 2u) % total; break;                                                      /* each note twice */
+    case 7:  p = ((A.pos >> 1) + (A.pos & 1u) * 2u) % total; break;                                /* zigzag: 0 2 1 3 2 4 ... */
+    default: p = A.pos % total; break;
+    }
+    A.pos++;
+    j = p % n;
+    for (k = 0; k < 27u; k++)                   /* the j-th key of the chord, from the lowest */
+        if (m >> k & 1u) { if (j == 0) break; j--; }
+    seq_cur = k;
+    fire(k, 12u * (p / n));
 }
 
 static void app_audio(int32_t *out, uint32_t n)
 {
-    uint32_t v, i;
-    for (v = 0; v < NV; v++) {
-        uint32_t ph = voice[v].ph, step = (uint32_t)(((uint64_t)voice[v].inc * bend_q16) >> 16);   /* (int64 multiply: fine) */
-        int32_t amp = voice[v].amp, g = voice[v].gate;
-        if (!amp && !g)
-            continue;                           /* silent: costs nothing */
-        for (i = 0; i < n; i++) {
-            int32_t s;
-            if (amp < g) { amp += 48; if (amp > g) amp = g; }        /* attack ~5 ms */
-            else if (amp > g) { amp -= 6; if (amp < g) amp = g; }    /* release ~45 ms */
-            ph += step;
-            s = (sine(ph) * amp) >> 15;
-            out[2u * i] += s;                   /* L */
-            out[2u * i + 1u] += s;              /* R */
+    static uint32_t blk;
+    uint32_t i;
+    for (i = 0; i < n; i++) {
+        int32_t s, la, ya, yb, m;
+        if (blk == 0) {                         /* every 32 frames: envelopes, filter coefficients */
+            int32_t idx, k, dec = (int32_t)P[3];
+            A.env_f = (int32_t)(((int64_t)A.env_f * DEC_K[dec]) >> 15);
+            k = dec + 25; if (k > 127) k = 127;
+            A.env_a = (int32_t)(((int64_t)A.env_a * DEC_K[k]) >> 15);
+            if (!A.gate) A.env_a = (A.env_a * 24000) >> 15;                /* the gate closed: quick release */
+            idx = (int32_t)P[0] + ((env2(A.env_f) * (int32_t)P[2]) >> 7);
+            if (idx > 127) idx = 127;
+            A.f = CUT_F[idx];
+            A.q = resq(P[1]);
+            A.tgt = A.env_a;
+            if (B.seen != b_trig) { B.seen = b_trig; B.env = 32767; }
+            B.env = (int32_t)(((int64_t)B.env * DEC_K[P[11]]) >> 15);
+            idx = (int32_t)P[8] + ((env2(B.env) * (int32_t)P[10]) >> 7);
+            if (idx > 127) idx = 127;
+            B.f = CUT_F[idx];
+            B.q = resq(P[9]);
+            A.inc = glide(A.inc, A.inc_t, P[5]);                           /* glide and detune, per block */
+            A.inc2 = A.inc + (uint32_t)(((uint64_t)A.inc * P[6]) >> 11);   /* detune: 0..127 -> up to about a semitone */
+            B.inc_t = b_inc;
+            B.inc = glide(B.inc, B.inc_t, P[13]);
+            B.inc2 = B.inc + (uint32_t)(((uint64_t)B.inc * P[14]) >> 11);
+            dlen = 3u * step_len;                                          /* the delay: a dotted eighth */
+            blk = 32;
         }
-        voice[v].ph = ph;
-        voice[v].amp = amp;
-    }
-}
+        blk--;
 
-/* ---- notes (main loop) */
-static const uint32_t INC_C9[12] = {            /* MIDI 120..131 (C9..B9); lower octaves shift right */
-    815363807u, 863847862u, 915214929u, 969636441u, 1027294024u, 1088380105u,
-    1153098554u, 1221665363u, 1294309365u, 1371273005u, 1452813141u, 1539201906u};
-static uint32_t ages, last_note = 255;
-
-static void play(uint32_t note, uint32_t vel)
-{
-    uint32_t v, pick = 0, best = 0xFFFFFFFFu;
-    if (note > 127u || !vel) return;
-    for (v = 0; v < NV; v++) {                  /* the same note, else a free voice, else the oldest */
-        uint32_t score = voice[v].note == note && voice[v].gate ? 0u
-                       : voice[v].gate ? 0x80000000u + voice[v].age : (uint32_t)voice[v].amp + 1u;
-        if (score < best) { best = score; pick = v; }
-    }
-    voice[pick].note = (uint8_t)note;
-    voice[pick].age = ++ages;
-    voice[pick].inc = INC_C9[note % 12u] >> (10u - note / 12u);
-    voice[pick].gate = (int32_t)(vel * 90u);    /* 127 -> 11430: four voices stay under full scale */
-    last_note = note;
-}
-static void stop(uint32_t note)
-{
-    uint32_t v;
-    for (v = 0; v < NV; v++)
-        if (voice[v].note == note)
-            voice[v].gate = 0;
-}
-static int quiet(void)                          /* nothing sounds, not even a release */
-{
-    uint32_t v;
-    for (v = 0; v < NV; v++)
-        if (voice[v].gate || voice[v].amp) return 0;
-    return 1;
-}
-
-/* ---- the screen: the name, the last note big, the keyboard with what sounds, the octave */
-#define C_ACC RGB(180, 140, 255)                /* lilac, as the logo */
-#define C_KEY RGB(210, 210, 210)
-#define C_OFF RGB(90, 90, 90)
-#define KEY0 53u                                /* key 0 = F3 */
-static int black(uint32_t note) { return (0x54Au >> (note % 12u)) & 1u; }
-
-static void draw_note(void)
-{
-    static const char *const NAME[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-    char s[8] = "-";
-    if (last_note < 128u) {
-        const char *p = NAME[last_note % 12u];
-        uint32_t i = 0;
-        while (*p) s[i++] = *p++;
-        if (last_note >= 12u) s[i++] = (char)('0' + last_note / 12u - 1u);
-        s[i] = 0;
-    }
-    draw_text_box(0, 82, 240, &FONT_L, s, C_WHITE, 1);
-}
-
-static void draw_keys(uint32_t lit)             /* bit k: key k sounds */
-{
-    uint32_t k, w = 0;
-    cv_begin(240, 56, C_BLACK);
-    for (k = 0; k < 27u; k++)                   /* 16 white keys of 14 px from x = 8 */
-        if (!black(KEY0 + k)) {
-            cv_rect(8 + (int32_t)w * 14, 0, 13, 56, lit >> k & 1u ? C_ACC : C_KEY);
-            w++;
+        /* the line's clock: a 16th, sample-accurate */
+        if (a_run && a_mask) {
+            if (A.tick == 0) arp_step();
+            else if (A.tick == gate_len) A.gate = 0;
+            if (++A.tick >= step_len) A.tick = 0;
+        } else {
+            A.tick = 0; A.gate = 0; A.pos = 0; seq_cur = 255u;
         }
-    for (k = 0, w = 0; k < 27u; k++)            /* the black ones on the line between two white */
-        if (black(KEY0 + k))
-            cv_rect(8 + (int32_t)w * 14 - 5, 0, 9, 34, lit >> k & 1u ? C_ACC : C_BLACK);
-        else
-            w++;
-    cv_blit(0, 140);
+        A.ph += A.inc; A.ph2 += A.inc2;
+        if (!P[6]) A.ph2 = A.ph;                                          /* no detune: one saw */
+        s = (((int32_t)A.ph >> 16) + ((int32_t)A.ph2 >> 16)) >> 1;       /* two saws */
+        la = svf(&A.sv2, svf(&A.sv, s, A.f, 36000), A.f, A.q);   /* two stages: 24 dB/oct, the resonance on the second */
+        if (la > 32767) la = 32767; else if (la < -32767) la = -32767;
+        A.amp += (A.tgt - A.amp) >> 4;
+        ya = (int32_t)(((int64_t)la * A.amp) >> 15);
+        ya = soft((ya * (int32_t)(8u + P[1] / 16u + P[4] / 4u)) >> 3);  /* resonance and DRIVE: up to a hard, dirty clip */
+        ya = (ya * (int32_t)(VOL[0] + 1u)) >> 7;
+
+        /* the bass: saw + detuned saw + sub square, low-pass, then saturation */
+        {
+            int32_t g = b_gate, in, lb;
+            if (B.amp < g) { B.amp += 600; if (B.amp > g) B.amp = g; }
+            else if (B.amp > g) { B.amp -= 10; if (B.amp < g) B.amp = g; }
+            if (B.amp) {
+                B.ph1 += B.inc; B.ph2 += B.inc2; B.ph3 += B.inc;
+                if (!P[14]) B.ph2 = B.ph1;
+                in = ((((int32_t)B.ph1 >> 16) + ((int32_t)B.ph2 >> 16)) * 3) >> 3;
+                in += (int32_t)B.ph3 < 0 ? 12000 : -12000;
+                lb = svf(&B.sv2, svf(&B.sv, in, B.f, 36000), B.f, B.q);
+                yb = soft((lb * (int32_t)(32u + P[12])) >> 3);            /* DRIVE */
+                yb = (int32_t)(((int64_t)yb * B.amp * 7) >> 18);
+                yb = (yb * (int32_t)(VOL[1] + 1u)) >> 7;
+            } else
+                yb = 0;
+        }
+        {
+            int32_t wet = dl[(dpos - dlen) & DMASK], v;                    /* the delay: sends of both, a darker echo fed back */
+            dlp += (wet - dlp) >> 2;
+            v = ((ya * (int32_t)P[7] + yb * (int32_t)P[15]) >> 7) + ((dlp * 14746) >> 15);
+            if (v > 32767) v = 32767; else if (v < -32767) v = -32767;
+            dl[dpos & DMASK] = (int16_t)v;
+            dpos++;
+            m = ((ya + yb + wet) * 19) >> 5;
+            if (m > 32767) m = 32767; else if (m < -32767) m = -32767;
+        }
+        out[2u * i] += m;
+        out[2u * i + 1u] += m;
+    }
 }
 
-static void draw_status(int32_t oct, uint32_t ch)
+/* ---- the screen: night blue, soft pink / violet / blue type, nothing else */
+#define C_BG RGB(9, 11, 32)
+#define C_LEAD RGB(255, 125, 205)
+#define C_BASS RGB(112, 170, 255)
+#define C_LAB RGB(176, 152, 255)
+#define C_TRK RGB(30, 29, 68)
+static const char *const KNOB_NAME[2][4] = {{"CUTOFF", "RESO", "ENV MOD", "DECAY"}, {"DRIVE", "GLIDE", "DETUNE", "DELAY"}};
+static const char *const TITLE[4] = {"LEAD A", "LEAD B", "BASS A", "BASS B"};
+static const char *const MODE_NAME[8] = {"UP", "DOWN", "UP-DN", "RANDOM", "OCT", "CONV", "DOUBLE", "ZIGZAG"};
+
+static void box(uint32_t y, const felucca_font_t *f, const char *s, uint16_t c)    /* centred text on the night blue */
 {
-    char s[24] = "OCT +0  MIDI OMNI";
-    s[4] = oct < 0 ? '-' : '+';
-    s[5] = (char)('0' + (oct < 0 ? -oct : oct));
-    if (ch) {
-        s[13] = 'C'; s[14] = 'H'; s[15] = (char)(ch < 10u ? ' ' : '1'); s[16] = (char)('0' + ch % 10u);
-    }
-    draw_text_box(0, 212, 240, &FONT_S, s, C_OFF, 1);
+    cv_begin(240, f->h, C_BG);
+    cv_text(((int32_t)240 - text_w(f, s)) / 2, 0, f, s, c);
+    cv_blit(0, y);
+    lcd_sync();
 }
 
-static void draw_midi(uint32_t src, uint32_t bpm, uint32_t running)   /* where notes came from last, the clock */
+static void draw_knob(uint32_t row, uint32_t v, uint16_t col, const char *name)
 {
-    char s[32] = "", *p = s;
-    const char *a = src == 2u ? "TRS IN" : src == 1u ? "USB IN" : "";
-    while (*a) *p++ = *a++;
-    if (bpm) {
-        if (p != s) { *p++ = ' '; *p++ = ' '; }
-        a = running ? "CLOCK " : "clock ";
-        while (*a) *p++ = *a++;
-        if (bpm >= 100u) *p++ = (char)('0' + bpm / 100u);
-        *p++ = (char)('0' + bpm / 10u % 10u);
-        *p++ = (char)('0' + bpm % 10u);
-        a = " BPM";
-        while (*a) *p++ = *a++;
-    }
+    cv_begin(240, 24, C_BG);
+    cv_text(12, 4, &FONT_S, name, C_LAB);
+    cv_rect(104, 10, 124, 4, C_TRK);
+    cv_rect(104, 10, (int32_t)(v * 124u / 127u), 4, col);
+    cv_blit(0, (uint32_t)(60 + 30 * (int32_t)row));
+}
+
+static char *put(char *p, const char *s) { while (*s) *p++ = *s++; return p; }
+static char *put_num(char *p, uint32_t v)
+{
+    if (v >= 100u) *p++ = (char)('0' + v / 100u);
+    if (v >= 10u) *p++ = (char)('0' + v / 10u % 10u);
+    *p++ = (char)('0' + v % 10u);
+    return p;
+}
+
+static void draw_status(uint32_t bpm, uint32_t mode, int32_t oct, uint32_t run)
+{
+    char s[44], *p = s;
+    p = put_num(p, bpm); p = put(p, "  ");
+    p = put(p, MODE_NAME[mode]);
+    p = put(p, run ? "  " : "  STOP  "); *p++ = oct < 0 ? '-' : '+'; *p++ = (char)('0' + (oct < 0 ? -oct : oct));
     *p = 0;
-    draw_text_box(0, 120, 240, &FONT_S, s, C_OFF, 1);
+    box(212, &FONT_S, s, C_LAB);
 }
 
-/* ---- MIDI in: from the main loop, and from app_idle while the screen draws (idle_ok) */
-static struct { uint8_t oct, ch; } set = {0, 0};   /* what survives a power-off (add yours, up to SECTOR_MAX bytes) */
-static uint32_t idle_ok, midi_src, clk_n, clk_t0, clk_bpm, clk_run, clk_beat_ms;
+/* ---- the main loop: no settings are kept; every start is the same raw saw */
+static struct { uint8_t v[16], vol[2], bpm, mode, tgt, page; int8_t oct; } set;
+static const uint8_t DEF[16] = {36, 90, 70, 40, 0, 0, 0, 0, 52, 55, 90, 35, 0, 0, 8, 0};
 
-static void midi_in(void)
+static void set_defaults(void)
 {
-    uint8_t st, d1, d2;
-    int src;
-    while ((src = midi_get(&st, &d1, &d2)) != 0) {   /* 1 USB, 2 the TRS jack */
-        uint32_t ty = st & 0xF0u;
-        if (st == 0xF8u) {                      /* clock: 24 a quarter note */
-            if (clk_n % 24u == 0u) {
-                if (clk_n) {
-                    uint32_t ms = fm1_ms - clk_t0;   /* a quarter's length */
-                    clk_bpm = ms ? (60000u + ms / 2u) / ms : 0;
-                }
-                clk_t0 = fm1_ms;
-                clk_beat_ms = fm1_ms;
-            }
-            clk_n++;
-            continue;
-        }
-        if (st == 0xFAu) { clk_run = 1; clk_n = 0; continue; }   /* START: the next clock is beat 1 */
-        if (st == 0xFBu) { clk_run = 1; continue; }              /* CONTINUE */
-        if (st == 0xFCu) { clk_run = 0; continue; }              /* STOP */
-        if (set.ch && (st & 15u) != set.ch - 1u) continue;      /* not our channel */
-        if (ty == 0x90u && d2) { play(d1, d2); midi_src = (uint32_t)src; }
-        else if (ty == 0x80u || ty == 0x90u) stop(d1);
-    }
+    uint32_t i;
+    for (i = 0; i < 16u; i++) set.v[i] = DEF[i];
+    set.vol[0] = set.vol[1] = 127;
+    set.bpm = 112; set.mode = 0; set.tgt = 0; set.page = 0; set.oct = 0;
 }
-static void app_idle(void)
+
+static void apply_tempo(uint32_t bpm)
 {
-    if (idle_ok) midi_in();
+    uint32_t len = 661500u / bpm;               /* 44100 * 60 / (4 * bpm) */
+    gate_len = len * 3u / 5u;
+    step_len = len;
+}
+
+static uint32_t lowest(uint32_t m, uint32_t *k)
+{
+    uint32_t i;
+    for (i = 0; i < 27u; i++) if (m >> i & 1u) { *k = i; return 1; }
+    return 0;
+}
+
+static int32_t turn(uint32_t *t, int32_t e)     /* detents -> a step; turn fast and it gets bigger */
+{
+    int32_t step = (fm1_ms - *t < 90u || e > 1 || e < -1) ? 10 : 4;
+    *t = fm1_ms;
+    return step * e;
 }
 
 static void app_main(void)
 {
-    uint32_t prev = 0, k, t_change = 0, dirty = 0, lit_drawn = ~0u, note_drawn = ~0u, status_drawn = ~0u;
-    uint32_t midi_drawn = ~0u;
-    uint8_t held[27] = {0};                     /* the note each key plays */
-#if BOARD_SMK37
-    static const uint8_t WHITE[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};   /* white key -> key */
-    uint8_t pad_note[16] = {0}, ext_note[FM1_NKEY] = {0};
-    smk_pw_t wheel = {0};
-    smk_pad_events = 1;                         /* the pads as events (smk_pad_take): they play here, lit while they sound */
-#endif
-    if (settings_load(&set, sizeof set) || (int8_t)set.oct < -2 || (int8_t)set.oct > 2 || set.ch > 16u)
-        set.oct = 0, set.ch = 0;
+    uint32_t prev = 0, drawn[5] = {~0u, ~0u, ~0u, ~0u, ~0u}, st_drawn = ~0u, view_drawn = ~0u;
+    uint32_t kt[5] = {0, 0, 0, 0, 0}, k, b, rel, b_key = 99;
+    int32_t e;
 
-    lcd_fill(0, 0, 240, 240, C_BLACK);
-    draw_text_box(0, 18, 240, &FONT_L, APP_NAME, C_ACC, 1);
-    draw_text_box(0, 52, 240, &FONT_S, "a sine to build on  v" APP_VER, C_OFF, 1);
+    set_defaults();
+    for (k = 0; k < 16u; k++) P[k] = set.v[k];
+    VOL[0] = set.vol[0]; VOL[1] = set.vol[1];
+    a_mode = set.mode; oct_sh = set.oct;
+    apply_tempo(set.bpm);
+
+    lcd_fill(0, 0, 240, 240, C_BG);
 
     for (;;) {
-        uint32_t keys, down, up, rel, b, lit = 0, out_ch = set.ch ? set.ch - 1u : 0u, st;
-        int32_t oct = (int8_t)set.oct, e;
-        uint32_t base = (uint32_t)((int32_t)KEY0 + 12 * oct);
+        uint32_t keys, down, old, st;
         platform_poll();
 
-        keys = fm1_in.notes;                    /* bit k: key k (0 = F3 .. 26 = G5) */
+        keys = fm1_in.notes;
         down = keys & ~prev;
-        up = prev & ~keys;
+        old = prev;
         prev = keys;
-        for (k = 0; k < 27u; k++) {                 /* (a key stops the note it started: the octave may change meanwhile) */
-#if BOARD_SMK37
-            uint32_t vel = fm1_in.key_vel[SMK_KEY_F3 + k];   /* the SMK's keys feel the velocity */
-#else
-            uint32_t vel = 100;
-#endif
-            if (down >> k & 1u) { held[k] = (uint8_t)(base + k); play(held[k], vel); midi_send(0x90u | out_ch, held[k], vel); }
-            if (up >> k & 1u) { stop(held[k]); midi_send(0x80u | out_ch, held[k], 0); }
-        }
-#if BOARD_SMK37
-        while ((e = smk_extkey_take()) >= 0) {  /* the keys left and right of the FM-1's 27: key << 8 | velocity */
-            uint32_t key = (uint32_t)e >> 8, vel = (uint32_t)e & 0x7Fu;
-            if (key >= FM1_NKEY) continue;
-            if (vel) { ext_note[key] = (uint8_t)(base + key - SMK_KEY_F3); play(ext_note[key], vel); midi_send(0x90u | out_ch, ext_note[key], vel); }
-            else if (ext_note[key]) { stop(ext_note[key]); midi_send(0x80u | out_ch, ext_note[key], 0); ext_note[key] = 0; }
-        }
-        while ((e = smk_pad_take()) >= 0) {     /* a pad: hardware pad << 8 | velocity (0 = let go) */
-            uint32_t pad = ((uint32_t)e >> 8) & 15u, vel = (uint32_t)e & 0x7Fu;
-            uint32_t w = pad < 8u ? pad + 8u : pad - 8u;   /* bottom row = white keys 1-8, top row 9-16 */
-            if (vel) { pad_note[pad] = (uint8_t)(base + WHITE[w]); play(pad_note[pad], vel); midi_send(0x90u | out_ch, pad_note[pad], vel); }
-            else if (pad_note[pad]) { stop(pad_note[pad]); midi_send(0x80u | out_ch, pad_note[pad], 0); pad_note[pad] = 0; }
-        }
-        {
-            int32_t bd = smk_pw_bend(&wheel, fm1_in.wheel[0], fm1_ms);   /* 1/4096 semitone */
-            bend_q16 = (uint32_t)(65536 + (bd * 3785 >> 12) + (((bd * bd) >> 12) * 109 >> 12));   /* ~2^(s/12) */
-        }
-#endif
 
-        b = fm1_input_edges(&rel);              /* buttons pressed since the last call (bit = button id) */
-        if (b & (1u << BTN_OCT_DOWN) && oct > -2) { set.oct = (uint8_t)(oct - 1); dirty = 1; t_change = fm1_ms; }
-        if (b & (1u << BTN_OCT_UP) && oct < 2) { set.oct = (uint8_t)(oct + 1); dirty = 1; t_change = fm1_ms; }
-        if ((e = fm1_enc_take(ENC_PRESETS)) != 0) {   /* detents turned since the last call */
-            int32_t c = (int32_t)set.ch + e;
-            set.ch = (uint8_t)(c < 0 ? 0 : c > 16 ? 16 : c);
-            dirty = 1;
-            t_change = fm1_ms;
+        if (down) {
+            if (set.tgt == 0u) {                /* the lead */
+                uint32_t m = old ? a_mask : 0u;     /* a chord latches; a fresh press after letting go replaces it */
+                a_mask = m | down;
+            } else {                            /* the bass is a drone: it rings until another key (the lowest of the new ones) */
+                lowest(down, &k);
+                b_key = k;
+                b_inc = note_inc((uint32_t)((int32_t)KEY0 + (int32_t)k - 24 + 12 * set.oct));
+                b_trig++;
+                b_gate = 32767;
+            }
         }
 
-        midi_in();
-        if (clk_bpm && fm1_ms - clk_t0 > 2000u) clk_bpm = 0, clk_run = 0;   /* the clock has stopped coming */
+        b = fm1_input_edges(&rel);
+        if (b & (1u << BTN_PLAY)) a_run ^= 1u;
+        if (b & (1u << BTN_HOME)) { a_mask = 0; b_gate = 0; }
+        if (b & (1u << BTN_FX)) set.page ^= 1u;
+        if (b & (1u << BTN_ARP)) { set.mode = (uint8_t)((set.mode + 1u) & 7u); a_mode = set.mode; }
+        if (b & (1u << BTN_OCT_DOWN) && set.oct > -1) { set.oct--; oct_sh = set.oct; }
+        if (b & (1u << BTN_OCT_UP) && set.oct < 1) { set.oct++; oct_sh = set.oct; }
 
-        oct = (int8_t)set.oct;
-        base = (uint32_t)((int32_t)KEY0 + 12 * oct);
-        for (k = 0; k < NV; k++)                /* what sounds, on the keys of this octave */
-            if (voice[k].gate && voice[k].note >= base && voice[k].note < base + 27u)
-                lit |= 1u << (voice[k].note - base);
-        for (k = 0; k < 27u; k++)
-            fm1_led_key(KEY_LED(k), lit >> k & 1u);
-        fm1_led_key(BTN_OCT_DOWN, oct < 0);
-        fm1_led_key(BTN_OCT_UP, oct > 0);
-        fm1_led_key(BTN_PLAY, clk_run || (clk_bpm && fm1_ms - clk_beat_ms < 80u));   /* lit: running; a blink a beat */
-#if BOARD_SMK37
-        for (k = 0; k < 16u; k++) {             /* a pad glows lilac while its key sounds */
-            uint32_t w = k < 8u ? k + 8u : k - 8u, on = lit >> WHITE[w] & 1u;
-            padled_set(k, on ? 90 : 4, on ? 60 : 2, on ? 128 : 8);
+        if ((e = fm1_enc_take(ENC_PRESETS)) != 0) set.tgt = e > 0 ? 1u : 0u;   /* right: the bass, left: the lead */
+        for (k = 0; k < 4u; k++) {              /* the four knobs act on the page of the lead or the bass */
+            uint8_t *v = &set.v[set.tgt * 8u + set.page * 4u + k];
+            if ((e = fm1_enc_take(ENC_KNOB1 + k)) != 0) {
+                int32_t x = (int32_t)*v + turn(&kt[k], e);
+                *v = (uint8_t)(x < 0 ? 0 : x > 127 ? 127 : x);
+            }
         }
-        padled_flush();                         /* (sends only what changed) */
-#endif
+        if ((e = fm1_enc_take(ENC_ALGORITHM)) != 0) {   /* the volume of the lead or the bass */
+            int32_t x = (int32_t)set.vol[set.tgt] + turn(&kt[4], e);
+            set.vol[set.tgt] = (uint8_t)(x < 0 ? 0 : x > 127 ? 127 : x);
+        }
+        for (k = 0; k < 16u; k++) P[k] = set.v[k];
+        VOL[0] = set.vol[0]; VOL[1] = set.vol[1];
+        if ((e = fm1_enc_take(ENC_SELECT)) != 0) {
+            int32_t x = (int32_t)set.bpm + 2 * e;
+            set.bpm = (uint8_t)(x < 60 ? 60 : x > 200 ? 200 : x);
+            apply_tempo(set.bpm);
+        }
 
-        idle_ok = 1;                            /* the drawing below may read MIDI meanwhile (LCD_IDLE) */
-        if (lit != lit_drawn) { lit_drawn = lit; draw_keys(lit); }   /* redraw only what changed */
-        if (last_note != note_drawn) { note_drawn = last_note; draw_note(); }
-        if ((st = (uint32_t)(oct + 2) | (uint32_t)set.ch << 4) != status_drawn) { status_drawn = st; draw_status(oct, set.ch); }
-        if ((st = midi_src | clk_bpm << 2 | clk_run << 12) != midi_drawn) { midi_drawn = st; draw_midi(midi_src, clk_bpm, clk_run); }
-        idle_ok = 0;
+        for (k = 0; k < 27u; k++) {             /* the held keys, the latched chord, the step that plays, the bass key glow */
+            uint32_t on = (keys >> k & 1u) || (b_gate && k == b_key) || (a_mask >> k & 1u);
+            fm1_led_key(KEY_LED(k), on);
+        }
+        fm1_led_key(BTN_PLAY, a_run);
+        fm1_led_key(BTN_FX, set.page);
 
-        if (dirty && quiet() && fm1_ms - t_change > 2000u) {   /* 2 s after the change, when silent (an erase stalls the sound) */
-            settings_save(&set, sizeof set);
-            dirty = 0;
+        if ((st = set.tgt * 2u + set.page) != view_drawn) {
+            view_drawn = st;
+            box(14, &FONT_L, TITLE[st], set.tgt ? C_BASS : C_LEAD);
+            for (k = 0; k < 5u; k++) drawn[k] = ~0u;
+        }
+        for (k = 0; k < 5u; k++) {
+            uint32_t v = k < 4u ? set.v[set.tgt * 8u + set.page * 4u + k] : set.vol[set.tgt];
+            if (v != drawn[k]) { drawn[k] = v; draw_knob(k, v, set.tgt ? C_BASS : C_LEAD, k < 4u ? KNOB_NAME[set.page][k] : "VOLUME"); }
+        }
+        if ((st = set.bpm | (uint32_t)set.mode << 8 | (uint32_t)(set.oct + 1) << 12 | a_run << 16) != st_drawn) {
+            st_drawn = st;
+            draw_status(set.bpm, set.mode, set.oct, a_run);
         }
     }
 }
