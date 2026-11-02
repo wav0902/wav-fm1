@@ -106,8 +106,10 @@ static struct {                                 /* the bass */
 typedef struct { int32_t hold; uint32_t cnt; } fx_t;
 static fx_t FXL, FXB;
 static volatile uint32_t load_peak;             /* the longest app_audio call, in timer ticks */
-static volatile uint32_t sp_hum, sp_pop;        /* the neon sign at start: the hum of the tube, and a crackle (set by the splash, played by the ISR) */
-static uint32_t sp_ph, sp_seed = 1u, sp_env;
+/* the start-up sound: a radio hunting for a signal (set by the splash, played by the ISR): hiss, a band-passed sweep, whistles, bleeps */
+static volatile uint32_t sp_hs, sp_na, sp_cf, sp_wi, sp_wa, sp_da, sp_bi, sp_ba;
+static uint32_t sp_seed = 1u, sp_wp, sp_bp, sp_d1, sp_d2, sp_d3;
+static svf_t SPF;
 
 static int32_t fx_run(fx_t *f, int32_t x, int32_t crush)
 {
@@ -181,6 +183,7 @@ static void arp_step(void)                      /* the next step of the latched 
 static const uint16_t DK[4] = {0x1111, 0x1151, 0x0911, 0x1111};      /* kick, per pattern: FLOOR CHASE PULSE */
 static const uint16_t DS[4] = {0x1010, 0x1010, 0x1010, 0x1010};      /* snare */
 static struct { uint32_t tick, step, kph, sph, seed, cl; int32_t kenv, kamp, senv, stn, hlp; fx_t fx; } D;
+static int32_t d_duck;                          /* the kit presses the lead and the bass down on every hit (a sidechain): the drums cut through however dirty they are */
 
 static int32_t drums(void)
 {
@@ -189,22 +192,22 @@ static int32_t drums(void)
     if (a_restart) { a_restart = 0; D.tick = 0; D.step = 0; }
     if (D.tick == 0 && a_run && !d_off) {                              /* a 16th: which drums hit */
         st = D.step; D.step = (D.step + 1u) & 15u;
-        if (DK[d_pat & 3u] >> st & 1u) { D.kenv = 32767; D.kamp = 32767; D.kph = 0; D.cl = 64u; }
-        if (DS[d_pat & 3u] >> st & 1u) { D.senv = 32767; D.stn = 32767; D.sph = 0; }
+        if (DK[d_pat & 3u] >> st & 1u) { D.kenv = 32767; D.kamp = 32767; D.kph = 0; D.cl = 64u; d_duck = (int32_t)P[24] * 150; }
+        if (DS[d_pat & 3u] >> st & 1u) { D.senv = 32767; D.stn = 32767; D.sph = 0; if ((int32_t)P[25] * 100 > d_duck) d_duck = (int32_t)P[25] * 100; }
     }
     if (++D.tick >= d_len) D.tick = 0;
     D.seed = D.seed * 1664525u + 1013904223u;
     nz = (int32_t)D.seed >> 17;                                        /* white noise +-16384 */
     if (D.senv) { D.hlp += (nz - D.hlp) >> 1; hp = nz - D.hlp; }       /* high-passed noise */
     if (D.kamp) {
-        uint32_t f = 97392u * 56u + (uint32_t)(((uint64_t)97392u * 120u * (uint32_t)D.kenv) >> 15);   /* 56 Hz, with a fast fall from +120 Hz, and a click: a punchy drum-machine kick */
+        uint32_t f = 97392u * 47u + (uint32_t)(((uint64_t)97392u * 130u * (uint32_t)D.kenv) >> 15);   /* 47 Hz, with a fast fall from +130 Hz, and a click: a boom with a punch */
         int32_t t;
         D.kph += f;
         t = (int32_t)D.kph >> 16; t = (t < 0 ? -t : t) * 2 - 32768;   /* a triangle, rounded by the soft clip into a sine */
         k = soft(t);
         k = (int32_t)(((int64_t)k * D.kamp) >> 15);
-        y += (k * (int32_t)P[24] * 2) >> 8;
-        if (D.cl) { y += (int32_t)(((int64_t)nz * (int32_t)D.cl) >> 6) * (int32_t)P[24] >> 10; D.cl--; }
+        y += (k * (int32_t)P[24] * 11) >> 9;
+        if (D.cl) { y += (int32_t)(((int64_t)nz * (int32_t)D.cl) >> 6) * (int32_t)P[24] * 16 >> 11; D.cl--; }
         D.kenv -= (D.kenv >> 8) + (D.kenv ? 1 : 0);
         D.kamp -= (D.kamp >> 12) + 1;
         if (D.kamp < 0) D.kamp = 0;
@@ -213,12 +216,15 @@ static int32_t drums(void)
         int32_t t, sn;
         D.sph += 97392u * 205u;
         t = (int32_t)D.sph >> 16; t = (t < 0 ? -t : t) * 2 - 32768;
-        sn = (int32_t)(((int64_t)soft(t) * D.stn) >> 16) + (int32_t)(((int64_t)hp * D.senv) >> 15);   /* the body and the noise */
-        y += (sn * (int32_t)P[25]) >> 6;
+        { int32_t na = (D.senv >> 1) + (int32_t)(((int64_t)D.senv * D.senv) >> 16);    /* the noise starts hard and falls fast: a crack, then a tail */
+          sn = (int32_t)(((int64_t)soft(t) * D.stn) >> 17) + (int32_t)(((int64_t)hp * na) >> 14); }   /* the body, and a lot of noise */
+        y += (sn * (int32_t)P[25] * 12) >> 8;
         D.stn -= (D.stn >> 9) + (D.stn ? 1 : 0); if (D.stn < 0) D.stn = 0;
-        D.senv -= (D.senv >> 12) + (D.senv ? 1 : 0); if (D.senv < 0) D.senv = 0;
+        D.senv -= (D.senv >> 11) + (D.senv ? 1 : 0); if (D.senv < 0) D.senv = 0;
     }
     y = fx_run(&D.fx, y, (int32_t)P[27]);                              /* CRUSH */
+    y = soft(y);                                                       /* the kit is glued by a soft clip: louder without breaking */
+    if (d_duck > 0) d_duck -= (d_duck >> 11) + 1;
     return (y * (int32_t)(VOL[2] + 1u)) >> 7;
 }
 
@@ -331,7 +337,7 @@ static void app_audio(int32_t *out, uint32_t n)
                 yb = 0;
         }
         {
-            int32_t wl, wr, vl, vr, a0, a1, ml, mr, dry = ya + yb + yd;        /* the delay: ping-pong, the echo bounces left, right, left... */
+            int32_t wl, wr, vl, vr, a0, a1, ml, mr, dry = (int32_t)(((int64_t)(ya + yb) * (32768 - d_duck)) >> 15) + yd;        /* the delay: ping-pong, the echo bounces left, right, left... */
             uint32_t dt = dlen << 8, di, df;
             if (dq < dt) { dq += 64u; if (dq > dt) dq = dt; }              /* a new tempo: the echo slides to its new time (up to 25% pitch bend) */
             else if (dq > dt) { dq -= 64u; if (dq < dt) dq = dt; }
@@ -347,15 +353,20 @@ static void app_audio(int32_t *out, uint32_t n)
             dl[dpos & DMASK] = (int16_t)soft(vl);                          /* soft: past 100% it rings on and on without exploding */
             dr[dpos & DMASK] = (int16_t)soft(vr);
             dpos++;
-            if (sp_pop) { sp_env = sp_pop; sp_pop = 0; }
-            if (sp_env || sp_hum) {                                        /* the sign: a 100 Hz buzz, and a crackle that dies away */
-                int32_t nz, sg;
+            if (sp_hs || sp_na || sp_wa || sp_da || sp_ba) {
+                int32_t nz, b, w, q, d;
                 sp_seed = sp_seed * 1664525u + 1013904223u;
-                sp_ph += 9739000u;
-                nz = (((int32_t)sp_seed >> 17) * (int32_t)(sp_env >> 4)) >> 12;
-                sg = (((int32_t)sp_ph >> 18) * (int32_t)sp_hum) >> 8;
-                if (sp_env) sp_env -= (sp_env >> 10) + 1u;
-                dry += nz + sg;
+                nz = (int32_t)sp_seed >> 17;
+                svf(&SPF, nz, (int32_t)sp_cf, 7000);
+                b = (SPF.band * (int32_t)sp_na) >> 6;                        /* a band of static */
+                sp_wp += sp_wi; q = (int32_t)sp_wp >> 16; q = (q < 0 ? -q : q) * 2 - 32768;
+                w = (soft(q) * (int32_t)sp_wa) >> 15;                        /* a soft ping, far away */
+                sp_d1 += 10713000u; sp_d2 += 10824000u; sp_d3 += 16070000u;   /* the drone: 110 Hz twice (a slow beat) and its fifth */
+                q = (int32_t)sp_d1 >> 16; d = soft((q < 0 ? -q : q) * 2 - 32768);
+                q = (int32_t)sp_d2 >> 16; d += soft((q < 0 ? -q : q) * 2 - 32768);
+                q = (int32_t)sp_d3 >> 16; d += soft((q < 0 ? -q : q) * 2 - 32768) >> 1;
+                sp_bp += sp_bi; q = (int32_t)sp_bp >> 16; q = soft((q < 0 ? -q : q) * 2 - 32768);
+                dry += ((nz * (int32_t)sp_hs) >> 8) + b + w + ((d * (int32_t)sp_da) >> 15) + ((q * (int32_t)sp_ba) >> 15);   /* and a few bleeps */
             }
             ml = ((dry + wl + (wl >> 1)) * 19) >> 5;
             mr = ((dry + wr + (wr >> 1)) * 19) >> 5;
@@ -411,26 +422,73 @@ static void draw_img(const img_t *m, uint32_t x, uint32_t y, uint32_t k)
     lcd_sync();
 }
 
-/* the sign lights up like old neon: it stutters, goes out, catches, then holds. {time ms, brightness 0..256, crackle} */
-static const uint16_t NEON[][3] = {
-    {400, 70, 7000}, {450, 0, 0}, {700, 130, 9000}, {790, 12, 0}, {1000, 175, 9000}, {1070, 30, 0},
-    {1230, 215, 11000}, {1280, 45, 0}, {1330, 190, 8000}, {1400, 60, 0}, {1560, 256, 20000}, {2150, 228, 6000}, {2200, 256, 0}};
-static void splash(void)                        /* ARP WAV 09: it flickers on, hums, and stays lit a moment */
+/* slow, like a title sequence: the logo rises out of the static in waves, LOST SIGNAL follows, and it stays lit. {time ms, brightness 0..256}, linear in between */
+static const uint16_t LG[][2] = {{0, 0}, {700, 0}, {1300, 25}, {1600, 10}, {2100, 55}, {2400, 30}, {3000, 100}, {3300, 75}, {3800, 150},
+                                 {4100, 120}, {4600, 200}, {4900, 170}, {5300, 256}, {9700, 256}};
+static const uint16_t TG[][2] = {{0, 0}, {4200, 0}, {4700, 90}, {5000, 30}, {5400, 170}, {5700, 70}, {6100, 256}, {9700, 256}};
+static const uint16_t PINGS[5] = {2600, 3300, 4000, 4800, 5600};   /* soft pings, a slow arpeggio that comes with LOST SIGNAL */
+static const uint16_t PING_HZ[5] = {330, 494, 659, 587, 440};
+static const uint16_t BIPS[5][4] = {{6300, 50, 1320, 2000}, {6750, 50, 1320, 2000}, {7500, 40, 990, 1700}, {8200, 50, 1320, 2000}, {8550, 140, 1760, 1700}};   /* time, length ms, Hz, level */
+#define SPLASH_MS 9700u                         /* the sound fades from 8.4 s to 9.2 s, then half a second of silence, then the screen */
+
+static uint32_t keyf(const uint16_t (*tb)[2], uint32_t n, uint32_t t)    /* brightness at time t */
 {
-    uint32_t t0 = fm1_ms, t, k = 0, kd = ~0u, i = 0;
+    uint32_t i;
+    for (i = 1; i < n; i++)
+        if (t < tb[i][0]) {
+            int32_t a = tb[i - 1][1], b = tb[i][1], t0 = tb[i - 1][0], t1 = tb[i][0];
+            return (uint32_t)(a + (b - a) * ((int32_t)t - t0) / (t1 - t0));
+        }
+    return tb[n - 1][1];
+}
+
+static void splash_snd(uint32_t t)              /* the sound: a deep drone that swells, faint static, soft pings */
+{
+    static uint32_t cell = ~0u, rs = 7u;
+    static uint32_t hsb;
+    uint32_t i, w = 0, hz = 0, da, fa = t < 8400u ? 256u : t < 9200u ? 256u * (9200u - t) / 800u : 0u;   /* the fade-out of the static and the drone */
+    if (t / 120u != cell) {                     /* the static changes level every 120 ms, with dropouts */
+        cell = t / 120u; rs = rs * 1664525u + 1013904223u;
+        hsb = t < 300u ? 0u : (rs >> 16 & 7u) < 2u ? 0u : 6u + (rs >> 20 & 15u) * (t < 3000u ? 1u : 2u) / 2u;
+    }
+    sp_hs = hsb * fa >> 8;
+    sp_cf = (uint32_t)CUT_F[70u + (t >> 7 & 7u)];
+    sp_na = t < 300u ? 0u : 8u * fa >> 8;
+    da = t < 300u ? 0u : t < 5600u ? (t - 300u) * 3800u / 5300u : 3800u;
+    sp_da = da * fa >> 8;
+    for (i = 0; i < 5u; i++)
+        if (t >= PINGS[i] && t < PINGS[i] + 800u) {
+            uint32_t d = t - PINGS[i];
+            w = d < 40u ? d * 40u : 1600u * (800u - d) / 760u;
+            hz = PING_HZ[i];
+        }
+    sp_wa = w; sp_wi = 97392u * hz;
+    hz = 0; w = 0;                              /* the bleeps: short, irregular, mostly towards the end */
+    for (i = 0; i < 5u; i++)
+        if (t >= BIPS[i][0] && t < BIPS[i][0] + BIPS[i][1] + 15u) {
+            uint32_t d = t - BIPS[i][0];
+            hz = BIPS[i][2];
+            w = d < 5u ? BIPS[i][3] * d / 5u : d < BIPS[i][1] ? BIPS[i][3] : BIPS[i][3] * (BIPS[i][1] + 15u - d) / 15u;
+        }
+    sp_bi = 97392u * hz; sp_ba = w;
+}
+
+static void splash(void)                        /* ARP WAV 09: a signal found slowly in the static, then it holds a moment */
+{
+    uint32_t t0 = fm1_ms, t, dl_ = ~0u, dt_ = ~0u, kl, kt, tl = 0;
     lcd_fill(0, 0, 240, 240, C_BG);
     do {
         t = fm1_ms - t0;
         platform_poll();
-        while (i < sizeof NEON / sizeof NEON[0] && t >= NEON[i][0]) {
-            k = NEON[i][1];
-            if (NEON[i][2]) sp_pop = NEON[i][2];
-            i++;
+        splash_snd(t);
+        if (t - tl >= 40u) {                    /* the picture follows every 40 ms (no faster: the glow rises, it does not flicker) */
+            tl = t;
+            kl = keyf(LG, sizeof LG / sizeof LG[0], t) & ~3u; kt = keyf(TG, sizeof TG / sizeof TG[0], t) & ~3u;
+            if (kl != dl_) { dl_ = kl; draw_img(&IMG_LOGO, (240u - IMG_LOGO.w) / 2u, LOGO_Y, kl); }
+            if (kt != dt_) { dt_ = kt; draw_img(&IMG_TAG, (240u - IMG_TAG.w) / 2u, TAG_Y, kt); }
         }
-        sp_hum = i == 0u ? 0u : t < 3000u ? 22u : 0u;                      /* the hum comes with the first spark, and stops before the end */
-        if (k != kd) { kd = k; draw_img(&IMG_LOGO, (240u - IMG_LOGO.w) / 2u, (240u - IMG_LOGO.h) / 2u, k); }
-    } while (t < 3400u);
-    sp_hum = 0;
+    } while (t < SPLASH_MS);
+    sp_hs = sp_na = sp_wa = sp_da = sp_ba = 0;
     lcd_fill(0, 0, 240, 240, C_BG);
 }
 
@@ -599,6 +657,7 @@ static void app_main(void)
 
         if ((st = set.tgt == 2u ? 6u + set.page : set.tgt * 3u + set.page) != view_drawn) {
             view_drawn = st;
+            cv_begin(198, 36, C_BG); cv_blit(0, 8); lcd_sync();               /* wipe the old title (they differ in width); the battery stays */
             draw_img(IMG_TITLE[st], (240u - IMG_TITLE[st]->w) / 2u, 8u, 256u);
             for (k = 0; k < 5u; k++) drawn[k] = ~0u;
         }
