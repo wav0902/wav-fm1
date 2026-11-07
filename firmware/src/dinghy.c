@@ -1,13 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* ARP WAV 09: a minimal synth for the FM-1, built on Dinghy. No presets, no saves: switch on, turn the knobs.
  *
- *   PRESETS             six voices, left to right: ARP, WAV, SEQ, KIT, VOX, FM1 (keys, knobs and volume act on that voice)
+ *   PRESETS             six voices, left to right: ARP, WAV, SEQ, KIT, SFX, FM1 (keys, knobs and volume act on that voice)
  *   KEYS (all 27)       ARP: hold a chord and let go, it keeps arpeggiating (latch). WAV: a drone, until the next key.
- *                       SEQ: stopped = EDIT, a key is heard, REC writes it in the next of 16 boxes. VOX: a vocoder voice.
+ *                       SEQ: stopped = EDIT, a key is heard, REC writes it in the next of 16 boxes.
  *   KNOB 1..4           ARP  A cutoff, env mod, decay, range | B delay, stretch, fm, crush
  *                       WAV  A cutoff, drive, delay, move   | B detune, warp, fm, crush
  *                       SEQ  A cutoff, env mod, decay, delay | B stretch, warp, fm, crush
- *                       KIT  kick, snare, hat, crush        VOX vowel, robot, delay, crush        FM1 tune, fine, ghost, crush
+ *                       KIT  kick, snare, hat, crush        SFX ghost, alien, delay, crush        FM1 tune, fine, ghost, crush
  *   FX                  page A / B               ALGORITHM  volume of the voice     SELECT  tempo     MASTER  the original master volume
  *   PLAY                ARP / WAV / KIT start-stop;  SEQ: play the loop / back to edit
  *   SEL                 KIT: the kit gets a tempo of its own / follows again;  SEQ: delete the last step    REC  SEQ: write the note
@@ -36,7 +36,6 @@ static volatile uint32_t d_pat, d_off, a_restart;   /* the drum pattern, drums s
 static volatile uint32_t b_inc, b_trig;
 static volatile int32_t b_gate;
 static volatile uint32_t d_len = 6014u;         /* frames per drum 16th */
-static volatile uint32_t x_gate, x_inc;         /* VOX: key down, its pitch */
 static volatile uint32_t f_off = 1u;            /* SFX: silent until its knobs are touched */
 static volatile uint32_t s_off = 1u;            /* FM1: silent until its knobs are touched */
 /* SEQ: the notes are written by the main loop, played by the ISR */
@@ -280,7 +279,7 @@ static int32_t drums(void)
     y = fx_run(&D.fx, y, (int32_t)P[27]);                                /* CRUSH */
     y = soft(y);                                                       /* the kit is glued by a soft clip */
     if (d_duck > 0) d_duck -= (d_duck >> 11) + 1;
-    return (y * (int32_t)(VOL[2] + 1u) * 68) >> 12;
+    return (y * (int32_t)(VOL[2] + 1u) * 85) >> 12;
 }
 
 /* ---- WAV: saw + detuned saw + sub square, low-pass, then saturation */
@@ -291,9 +290,6 @@ static struct {
     fx_t fx;
 } B;
 
-/* ---- VOX: a vocoder voice, a buzzy carrier through two formants (VOWEL), ROBOT hardens and chops it */
-static struct { uint32_t ph, ph2, rph, seed; int32_t amp, f1, f2; svf_t a, b, c, d; fx_t fx; } X;
-static const uint16_t VOW5[5][2] = {{270, 2290}, {530, 1840}, {730, 1090}, {570, 840}, {300, 870}};
 static int32_t fcoef(uint32_t hz)               /* 2 sin(pi f / 44100) in Q15 (a short series: the formants are under 2.4 kHz) */
 {
     int64_t x = (int64_t)hz * 1195, x3 = (((x * x) >> 24) * x) >> 24;
@@ -303,12 +299,12 @@ static int32_t fcoef(uint32_t hz)               /* 2 sin(pi f / 44100) in Q15 (a
 
 /* ---- FM1: a radio. 20 stations hide on a long dial; at every power-on four are drawn, put in new places, and each one sounds a little different.
  * Everything is integers: phases are 32-bit turns, levels Q15, decays are "e -= e * rate >> 24" (RT(ms) gives the rate for a time constant). */
-#define NST 20u
+#define NST 24u
 #define RT(ms) (380449u / (ms))                 /* 2^24 / (44.1 * ms): the per-sample decay rate for a time constant in ms */
 #define MS(ms) ((uint32_t)(ms) * 441u / 10u)    /* ms -> samples */
 #define HZP(h) ((uint32_t)(h) * 97392u)         /* an integer Hz -> a 32-bit phase step */
 static uint32_t hz8p(uint32_t q8) { return (uint32_t)(((uint64_t)q8 * 97392u) >> 8); }   /* Q8 Hz -> phase step */
-static const uint16_t SGQ[NST] = {256, 256, 256, 256, 256, 256, 256, 256, 256, 256, 435, 120, 512, 512, 563, 307, 146, 172, 947, 282};   /* so that every station is as loud as the others (x256) */
+static const uint16_t SGQ[NST] = {192, 256, 410, 256, 256, 256, 230, 179, 256, 108, 243, 120, 538, 512, 384, 256, 248, 187, 947, 282, 410, 1408, 61, 282};   /* so that every station is as loud as the others (x256) */
 
 static uint32_t r_seed = 1u;
 static uint32_t rnd32(void) { r_seed = r_seed * 1664525u + 1013904223u; return r_seed; }
@@ -388,6 +384,8 @@ static struct {
     uint32_t jbv[4], jsv[4];
     /* 18 truck horn */
     uint32_t thf, thk, thp[3]; int32_t the, thl;
+    /* 20 typewriter, 21 clock, 22 wind, 23 neon, and the old speaker */
+    uint32_t twn, twt, twl, twd, twr, twp, twdp, twm, wn1, wn2, wn3, nn1, nn2, nfn, nft; int32_t twe, twf, twg, xt1, wnfc, cke; svf_t wnd, vf, vg;
     /* 19 morse */
     uint32_t mof, mou, mot, moi, mon, moq_n; int32_t moe; uint32_t mop; uint16_t moq[200];
 } R;
@@ -764,6 +762,57 @@ static int32_t station3(uint32_t ty)
         lp(&R.thl, (hs * 1833) >> 15, 22938);
         y = (int32_t)(((int64_t)R.thl * R.the) >> 15);
         break; }
+    case 20: {                                  /* a typewriter: keys, a bell at the end of the line, the carriage going back */
+        int32_t hp, e;
+        uint32_t d;
+        if (n >= R.twn) {
+            if (R.twl == 0u) { R.twl = 25u + (rnd16() * 20u >> 16); R.twn = n + MS(50); }
+            else {
+                R.twl--; R.twt = n; R.twe = E30; R.twf = E30; R.twp = 0;
+                R.twn = n + MS(60) + (uint32_t)(((uint64_t)rnd16() * MS(140)) >> 16);
+                if (R.twl == 0u) { R.twd = n + MS(300); R.twr = n + MS(350); R.twn = n + MS(3500) + (uint32_t)(((uint64_t)rnd16() * MS(2000)) >> 16); }
+            }
+        }
+        R.twp += HZP(160); R.twdp += HZP(2300); R.twm += HZP(40);
+        hp = nz - lp(&R.xt1, nz, 19661);
+        y = (int32_t)(((int64_t)hp * (R.twe >> 15) >> 15) >> 1) + (int32_t)(((int64_t)sn(R.twp) * (R.twf >> 15) >> 15) * 5000 >> 15);
+        edec(&R.twe, RT(3)); edec(&R.twf, RT(12));
+        if (n >= R.twd) { R.twd = 0xFFFFFFFFu; R.twg = E30; }
+        y += (int32_t)(((int64_t)sn(R.twdp) * (R.twg >> 15) >> 15) * 4500 >> 15);
+        edec(&R.twg, RT(600));
+        if (n >= R.twr) { R.twr = 0xFFFFFFFFu; R.twl = 0u; R.cke = (int32_t)MS(400); }
+        if (R.cke > 0) {
+            d = MS(400) - (uint32_t)R.cke; R.cke--;
+            e = (int32_t)(((int64_t)sn(d * 121745u) * (32768 + sn(R.twm)) >> 16));
+            y += (int32_t)(((int64_t)(nz >> 2) * e) >> 15);
+        }
+        break; }
+    case 21: {                                  /* a clock: tick, tock */
+        uint32_t m = n % 44100u, h = m % 22050u;
+        if (h == 0u) R.twe = E30;
+        y = (((sn(h * HZP(m < 22050u ? 1900u : 1450u)) * 6500) >> 15) + (nz >> 2));
+        y = (int32_t)(((int64_t)y * (R.twe >> 15)) >> 15);
+        edec(&R.twe, RT(12));
+        break; }
+    case 22: {                                  /* wind in an empty street */
+        R.wn1 += hz8p(23); R.wn2 += hz8p(79); R.wn3 += hz8p(33);
+        if ((n & 31u) == 0u) {
+            int32_t a = (32768 + sn(R.wn1)) >> 1, b = 19661 + ((sn(R.wn2) * 13107) >> 15);
+            R.wnfc = fcoef((uint32_t)(300 + ((((700 * a) >> 15) * b) >> 15)));
+        }
+        svf(&R.wnd, nz, R.wnfc, 2500);
+        { int32_t s3 = sn(R.wn3 + 683565275u), g = 14746 + ((18022 * ((s3 * s3) >> 15)) >> 15);
+          y = (int32_t)(((int64_t)R.wnd.band * g >> 15) * 11469 >> 13); }
+        break; }
+    case 23: {                                  /* a neon sign: a hum, and a flicker now and then */
+        int32_t e;
+        uint32_t d;
+        R.nn1 += HZP(120); R.nn2 += HZP(240);
+        if (n >= R.nfn) { R.nfn = n + MS(1500) + (uint32_t)(((uint64_t)rnd16() * MS(4000)) >> 16); R.nft = n; }
+        d = n - R.nft; e = (d < MS(400) && sn(d * HZP(23)) < 0) ? 1 : 0;
+        y = (((int32_t)R.nn1 >> 16) * 2600 >> 15) + (sn(R.nn2) * 1200 >> 15) + ((nz * 5) >> 7);
+        if (e) y = ((y * 5) >> 5) + (nz >> 3);
+        break; }
     case 19: {                                  /* morse: someone, far away, sending groups of five letters */
         if (n >= R.mot) {
             if (R.moi >= R.moq_n) { morse_build(); R.moi = 0; }
@@ -787,8 +836,8 @@ static void sig_roll(void)                      /* "power on": four stations out
         for (i = 0; i < 4u; i++) p[i] = 30 + (int32_t)(rnd16() * 450u >> 16);
         for (i = 1; i < 4u; i++) for (j = i; j > 0 && p[j - 1] > p[j]; j--) { a = p[j]; p[j] = p[j - 1]; p[j - 1] = a; }
     } while ((p[1] - p[0] < 100 || p[2] - p[1] < 100 || p[3] - p[2] < 100) && ++tries < 2000u);
-    for (i = 0; i < NST; i++) c[i] = i;
-    for (i = NST - 1u; i > 0; i--) { j = rnd16() * (i + 1u) >> 16; tmp = c[i]; c[i] = c[j]; c[j] = tmp; }
+    { static const uint8_t SC[12] = {0, 2, 10, 9, 14, 12, 18, 7, 20, 21, 22, 23}; for (i = 0; i < 12u; i++) c[i] = SC[i]; }   /* 1930-50, a scene from a film: phone, storm, police car, bell, train, traffic, horn, crowd, typewriter, clock, wind, neon */
+    for (i = 11u; i > 0; i--) { j = rnd16() * (i + 1u) >> 16; tmp = c[i]; c[i] = c[j]; c[j] = tmp; }
     for (i = 0; i < 4u; i++) { R.pos[i] = p[i]; R.cont[i] = c[i]; }
     for (i = 0; i < 8u; i++) R.dig[i] = (uint8_t)(rnd16() * 10u >> 16);                             /* a new number to dial */
     R.alow = (int32_t)rr(205, 333);
@@ -816,6 +865,7 @@ static void sig_roll(void)                      /* "power on": four stations out
     R.thf = rr(190, 250) << 8; R.thk = rr(0, 2);
     R.mof = rr(560, 740); R.mou = 52920u / rr(12, 20); R.moq_n = 0; R.moi = 0;
     R.sc1 = 500 << 8; R.sc2 = 1500 << 8;
+    R.twn = MS(1000); R.twt = 0xF0000000u; R.twd = R.twr = 0xFFFFFFFFu; R.nfn = MS(3000); R.nft = 0xF0000000u;
     R.wstep = 1; R.o23 = 1;
     for (i = 0; i < 2048u; i++) gd[i] = 0;
     for (i = 0; i < 6615u; i++) gg1[i] = 0;
@@ -864,6 +914,11 @@ static int32_t sig_voice(void)
         int32_t g = ((R.pw * 3932) >> 15) + (int32_t)(((int64_t)((R.pn * 28836) >> 15) * cl) >> 15);
         ty = R.cont[R.bk];
         sig = ty < 6u ? station(ty) : ty < 14u ? station2(ty) : station3(ty);
+        if (!(ty == 6u || (ty >= 15u && ty <= 17u))) {                  /* the same old speaker for every scene: narrow, a little crackle */
+            int32_t vl;
+            if (rnd16() < 7u) sig += (((int32_t)rnd16() - 32768) * 7000) >> 16;
+            vl = svf(&R.vf, sig, 11000, 5000); sig = vl - svf(&R.vg, vl, 1700, 5000); sig = (sig * 21) >> 4;
+        }
         sig = (int32_t)(((int64_t)sig * SGQ[ty] >> 8) * g >> 15);
         x += sig;
     }
@@ -1027,19 +1082,19 @@ static int32_t sfx_sample(void)
     y += (((t1 * 128 + t2 * 102) >> 7) * (115 * dq / 127)) >> 7;
     y = fx_run(&FXF, y, (int32_t)P[63]);
     y = soft(y);
-    return (y * (int32_t)(VOL[6] + 1u)) >> 7;
+    return (y * (int32_t)(VOL[6] + 1u) * 3) >> 8;
 }
 
 static void app_audio(int32_t *out, uint32_t n)
 {
     static uint32_t blk, dfb = 14746u, q_seen, qr_seen, rl;
-    static int32_t ds0, ds1, ds2, ds3;
+    static int32_t ds0, ds1, ds3;
     uint32_t i, t0 = fm1_ticks();
     for (i = 0; i < n; i++) {
-        int32_t ya, yb, yq, yx, ys, yd, yf;
+        int32_t ya, yb, yq, ys, yd, yf;
         if (blk == 0) {                         /* every 32 frames: envelopes, filter coefficients */
             int32_t idx, bar_fr, fb, mx;
-            uint32_t bar, p, i0, fr;
+            uint32_t bar;
             lead_block(&LA, 0); lead_block(&LQ, 48); kit_block();
             q_gate = ((uint32_t)step_len * (762u + 14u * P[49])) / 1270u;           /* SEQ STRETCH */
             LA.incb = LA.inc_t;
@@ -1068,14 +1123,10 @@ static void app_audio(int32_t *out, uint32_t n)
             fb = 32768 - (((bar_fr * ez(P[19])) >> 7) >> 1);
             B.incb = (uint32_t)(((uint64_t)b_inc * (uint32_t)fb) >> 15);
             B.inc2 = B.incb + (uint32_t)(((uint64_t)B.incb * (uint32_t)(8 + (ez(P[14]) >> 1))) >> 11);   /* DETUNE */
-            /* VOX: the two formants slide between the five vowels */
-            p = P[36] * 4u * 256u / 127u; i0 = p >> 8; if (i0 > 3u) i0 = 3u; fr = p - (i0 << 8);
-            X.f1 += (fcoef((uint32_t)((int32_t)VOW5[i0][0] + ((((int32_t)VOW5[i0 + 1][0] - (int32_t)VOW5[i0][0]) * (int32_t)fr) >> 8))) - X.f1) >> 2;
-            X.f2 += (fcoef((uint32_t)((int32_t)VOW5[i0][1] + ((((int32_t)VOW5[i0 + 1][1] - (int32_t)VOW5[i0][1]) * (int32_t)fr) >> 8))) - X.f2) >> 2;
             dlen = 3u * step_len;                                          /* the delay: a dotted eighth (halved until it fits, at very slow tempi) */
             while (dlen > 32000u) dlen >>= 1;
-            ds0 = ez(P[6]); ds1 = ez(P[18]); ds2 = ez(P[38]); ds3 = ez(P[54]);
-            mx = ds0 > ds1 ? ds0 : ds1; if (ds2 > mx) mx = ds2; if (ds3 > mx) mx = ds3;
+            ds0 = ez(P[6]); ds1 = ez(P[18]); ds3 = ez(P[54]);
+            mx = ds0 > ds1 ? ds0 : ds1; if (ds3 > mx) mx = ds3;
             dfb = 11000u + 190u * (uint32_t)mx;                            /* the more you send, the longer it rings: 33% .. 107% */
             rl += 32u * 535656u;
             blk = 32;
@@ -1136,40 +1187,14 @@ static void app_audio(int32_t *out, uint32_t n)
             }
         }
 
-        /* VOX */
-        yx = 0;
-        if (x_gate || X.amp > 40) {
-            int32_t src, o, ro_e = ez(P[37]), rq, g2 = x_gate ? 32767 : 0;
-            X.ph += x_inc;
-            src = (int32_t)X.ph >> 16;
-            if (ro_e) {                                                    /* ROBOT, clean: a second carrier 1% off, a fast ring chop, narrow resonances. No drive, no noise */
-                int32_t fq, mq = ro_e * 103;
-                X.rph += 110u * 97392u;
-                X.ph2 += x_inc + (uint32_t)(((uint64_t)x_inc * 1573u) >> 18);
-                src = (src * 1270 + (((int32_t)X.ph2 >> 16) * 7 * ro_e)) / (1270 + 7 * ro_e);
-                fq = 32768 - mq + (int32_t)(((int64_t)mq * SIN256[X.rph >> 24]) >> 15);
-                src = (int32_t)(((int64_t)src * fq) >> 15);
-            }
-            X.amp += (g2 - X.amp) >> (g2 > X.amp ? 7 : 12);
-            rq = 3200 - (1500 * ro_e) / 127;
-            svf(&X.a, src, X.f1, rq); svf(&X.b, src, X.f2, rq);
-            o = X.a.band + X.b.band;
-            svf(&X.c, src, 11500, 3200); o += (int32_t)(((int64_t)X.c.band * (6554 + 26 * ro_e)) >> 13);        /* air */
-            svf(&X.d, src, 3300, 3000); o += (int32_t)(((int64_t)X.d.band * (4506 + 13 * ro_e)) >> 13);        /* presence: the voice is clear */
-            yx = vlim(o >> 2);
-            yx = fx_run(&X.fx, yx, (int32_t)P[39]);
-            yx = (int32_t)(((int64_t)yx * X.amp) >> 15);
-            yx = (yx * (int32_t)(VOL[3] + 1u)) >> 7;
-        }
-
         /* FM1 */
         ys = 0;
-        if (!s_off) { ys = sig_voice(); ys = fx_run(&FXS, ys, (int32_t)P[43]); ys = (ys * (int32_t)(VOL[4] + 1u) * 14) >> 9; }
+        if (!s_off) { ys = sig_voice(); ys = fx_run(&FXS, ys, (int32_t)P[43]); ys = (ys * (int32_t)(VOL[4] + 1u) * 20) >> 9; }
 
         yd = drums();
         yf = sfx_sample();
         {
-            int32_t wl, wr, vl, vr, a0, a1, ml, mr, dry = (int32_t)(((int64_t)(ya + yb + yx + ys + yq) * (32768 - d_duck)) >> 15) + yd + yf;
+            int32_t wl, wr, vl, vr, a0, a1, ml, mr, dry = (int32_t)(((int64_t)(ya + yb + ys + yq) * (32768 - d_duck)) >> 15) + yd + yf;
             uint32_t dt = dlen << 8, di, df;
             if (dq < dt) { dq += 64u; if (dq > dt) dq = dt; }              /* a new tempo: the echo slides to its new time (up to 25% pitch bend) */
             else if (dq > dt) { dq -= 64u; if (dq < dt) dq = dt; }
@@ -1180,7 +1205,7 @@ static void app_audio(int32_t *out, uint32_t n)
             wr = a0 + (((a1 - a0) * (int32_t)df) >> 8);
             dlpl += ((wl - dlpl) * 3) >> 2;                               /* a light low-pass in the loop: the echoes stay bright */
             dlpr += ((wr - dlpr) * 3) >> 2;
-            vl = ((ya * ds0 + yb * ds1 + yx * ds2 + yq * ds3) >> 7) + ((dlpr * (int32_t)dfb) >> 15);
+            vl = ((ya * ds0 + yb * ds1 + yq * ds3) >> 7) + ((dlpr * (int32_t)dfb) >> 15);
             vr = (dlpl * (int32_t)dfb) >> 15;
             dl[dpos & DMASK] = (int16_t)soft(vl);                          /* soft: past 100% it rings on and on without exploding */
             dr[dpos & DMASK] = (int16_t)soft(vr);
@@ -1354,7 +1379,7 @@ static void draw_battery(uint32_t raw)          /* top right: a battery with fou
 #define C_SEQ RGB(255, 194, 236)
 #define C_SFX RGB(154, 72, 232)
 static const uint16_t VCOL[7] = {C_ARP, C_WAV, C_KIT, C_VOX, C_FM1, C_SEQ, C_SFX};
-static const uint8_t VORD[7] = {0, 1, 5, 2, 3, 6, 4};           /* the PRESETS knob, left to right: ARP WAV SEQ KIT VOX SFX FM1 */
+static const uint8_t VORD[6] = {0, 1, 5, 2, 6, 4};              /* the PRESETS knob, left to right: ARP WAV SEQ KIT SFX FM1 */
 static const uint8_t PGN[7] = {2, 2, 1, 1, 1, 2, 1};               /* pages per voice */
 static const uint8_t UIMAP[7][2][4] = {{{0, 2, 3, 5}, {6, 1, 8, 11}}, {{12, 17, 18, 15}, {14, 19, 20, 23}}, {{24, 25, 26, 27}}, {{36, 37, 38, 39}}, {{40, 41, 42, 43}}, {{48, 50, 51, 54}, {49, 55, 56, 59}}, {{60, 61, 62, 63}}};
 static const char *const UINAME[7][2][4] = {
@@ -1486,16 +1511,12 @@ static void app_main(void)
         old = prev;
         prev = keys;
 
-        if (tg == 3u && !keys) x_gate = 0;
         if (tg == 5u && !keys) q_hold = 0;
         if (down) {
             if (tg == 0u) {                     /* ARP: a chord latches; a fresh press after letting go replaces it */
                 uint32_t m = old ? a_mask : 0u;
                 if (!a_mask) a_restart = 1u;        /* a chord from nothing: the bar (and the drums) start together */
                 a_mask = m | down;
-            } else if (tg == 3u) {              /* VOX: the lowest of the new keys */
-                lowest(down, &k);
-                x_inc = note_inc(KEY0 + k - 12u + (uint32_t)(12 * octv[3])); x_gate = 1;
             } else if (tg == 5u) {              /* SEQ: stopped, a key is heard and written in the next box */
                 if (!sqrun) { lowest(down, &k); seq_key(k); }
             } else if (tg == 2u || tg == 4u || tg == 6u) {  /* the kit, the radio and the noise machine: the keys do nothing */
@@ -1519,7 +1540,7 @@ static void app_main(void)
         }
 
         if (b & (1u << BTN_REC) && tg == 5u && !sqrun) q_rec ^= 1u;
-        if (b & (1u << BTN_HOME)) { a_mask = 0; b_gate = 0; d_off = 1; s_off = 1; x_gate = 0; f_off = 1; sqrun = 0; sqn = 0; sqc = 0; q_rec = 0; }
+        if (b & (1u << BTN_HOME)) { a_mask = 0; b_gate = 0; d_off = 1; s_off = 1; f_off = 1; sqrun = 0; sqn = 0; sqc = 0; q_rec = 0; }
         if (b & (1u << BTN_SEL)) {
             if (tg == 5u) { if (sqn) sqn--; sqc = sqn % 16u; if (!sqn) sqrun = 0; }   /* SEQ: delete the last step */
             else {                              /* the kit lets go of the tempo, or follows it again */
@@ -1532,9 +1553,9 @@ static void app_main(void)
         if (b & (1u << BTN_OCT_DOWN) && octv[tg] > -1) octv[tg]--;
         if (b & (1u << BTN_OCT_UP) && octv[tg] < 1) octv[tg]++;
 
-        if ((e = fm1_enc_take(ENC_PRESETS)) != 0) {   /* left to right: ARP WAV SEQ KIT VOX SFX FM1 */
+        if ((e = fm1_enc_take(ENC_PRESETS)) != 0) {   /* left to right: ARP WAV SEQ KIT SFX FM1 */
             int32_t t = (int32_t)set.pos + (e > 0 ? 1 : -1);
-            t = t < 0 ? 0 : t > 6 ? 6 : t;
+            t = t < 0 ? 0 : t > 5 ? 5 : t;
             if ((uint8_t)t != set.pos) { set.page = 0; q_rec = 0; }      /* every voice starts on page A */
             set.pos = (uint8_t)t; set.tgt = VORD[t]; tg = set.tgt;
         }
