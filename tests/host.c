@@ -32,6 +32,9 @@
 #define HALF_FRAMES 256u
 
 static volatile uint32_t fm1_ms;
+static uint32_t fm1_ticks(void) { static uint32_t t; return t += 24000u; }
+enum { FM1_ADC_BATT = 3 };
+static int32_t fm1_adc_read(uint32_t ch) { (void)ch; return 600; }   /* ACID: a fake timer for the load readout */
 #if BOARD_SMK37
 /* the SMK-37 (hal/smk_input.h's API): keys with velocity, pads as events, 4 faders, 2 wheels, the outer keys, the
  * pad LEDs; 8 encoders (K1 = MASTER) */
@@ -101,7 +104,7 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
             }
 }
 #ifndef CV_MAX
-#define CV_MAX (240u * 64u)
+#define CV_MAX (240u * 124u)
 #endif
 #include "gfx.c"
 
