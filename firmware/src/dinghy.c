@@ -1,13 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* ARP WAV 09: a minimal synth for the FM-1, built on Dinghy. No presets, no saves: switch on, turn the knobs.
  *
- *   PRESETS             six voices, left to right: ARP, WAV, SEQ, KIT, SFX, FM1 (keys, knobs and volume act on that voice)
+ *   PRESETS             five voices, left to right: ARP, WAV, SEQ, KIT, FM1 (keys, knobs and volume act on that voice)
  *   KEYS (all 27)       ARP: hold a chord and let go, it keeps arpeggiating (latch). WAV: a drone, until the next key.
  *                       SEQ: stopped = EDIT, a key is heard, REC writes it in the next of 16 boxes.
  *   KNOB 1..4           ARP  A cutoff, env mod, decay, range | B delay, stretch, fm, crush
  *                       WAV  A cutoff, drive, delay, move   | B detune, warp, fm, crush
- *                       SEQ  A cutoff, env mod, decay, delay | B stretch, warp, fm, crush
- *                       KIT  kick, snare, hat, crush        SFX ghost, alien, delay, crush        FM1 tune, fine, ghost, crush
+ *                       SEQ  A cutoff, env mod, decay, delay | B stretch, glide, fm, crush
+ *                       KIT  kick, snare, hat, crush        FM1 tune, fine, ghost, crush
  *   FX                  page A / B               ALGORITHM  volume of the voice     SELECT  tempo     MASTER  the original master volume
  *   PLAY                ARP / WAV / KIT start-stop;  SEQ: play the loop / back to edit
  *   SEL                 KIT: the kit gets a tempo of its own / follows again;  SEQ: delete the last step    REC  SEQ: write the note
@@ -36,7 +36,6 @@ static volatile uint32_t d_pat, d_off, a_restart;   /* the drum pattern, drums s
 static volatile uint32_t b_inc, b_trig;
 static volatile int32_t b_gate;
 static volatile uint32_t d_len = 6014u;         /* frames per drum 16th */
-static volatile uint32_t f_off = 1u;            /* SFX: silent until its knobs are touched */
 static volatile uint32_t s_off = 1u;            /* FM1: silent until its knobs are touched */
 /* SEQ: the notes are written by the main loop, played by the ISR */
 static volatile uint8_t sq[16], sqk[16];        /* note (with octave), key (for the LED) */
@@ -118,9 +117,9 @@ static int32_t fx_run(fx_t *f, int32_t x, int32_t crush)
 
 static volatile uint32_t load_peak;             /* the longest app_audio call, in timer ticks */
 /* the start-up sound: a radio hunting for a signal (set by the splash, played by the ISR): hiss, a band-passed sweep, whistles, bleeps */
-static volatile uint32_t sp_hs, sp_na, sp_cf, sp_wi, sp_wa, sp_da, sp_bi, sp_ba;
-static uint32_t sp_seed = 1u, sp_wp, sp_bp, sp_d1, sp_d2, sp_d3;
-static svf_t SPF;
+static volatile uint32_t sp_hs, sp_na, sp_cf, sp_wi, sp_wa, sp_da, sp_bi, sp_ba, sp_cr, sp_ca, sp_fa;   /* sp_cr: crackle chance, sp_ca: crackle level, sp_fa: noise burst of the neon */
+static int32_t sp_ce;
+static uint32_t sp_seed = 1u, sp_wp, sp_bp;
 
 /* ---- the lead voice, shared by ARP and SEQ: o = where its knobs live in P (0 for ARP, 48 for SEQ) */
 typedef struct {
@@ -163,7 +162,7 @@ static int32_t lead_sample(lead_t *l, uint32_t o, uint32_t vol)
     l->amp += (l->tgt - l->amp) >> 4;
     ya = soft((int32_t)(((int64_t)la * l->amp) >> 15));
     ya = fx_run(&l->fx, ya, (int32_t)P[o + 11]);
-    return (ya * (int32_t)(vol + 1u) * (o ? 13 : 8)) >> 10;               /* the SEQ is 1.6x louder: it has to stand against the bass */
+    return (ya * (int32_t)(vol + 1u) * (o ? 16 : 8)) >> 10;               /* the SEQ is 1.6x louder: it has to stand against the bass */
 }
 
 static void arp_fire(uint32_t key, uint32_t up)
@@ -201,11 +200,15 @@ static void seq_step(void)                      /* the next box of the loop */
 /* ---- the kit: KICK and SNARE set the level AND move along a row of different drums, so each position is another sound */
 static const uint16_t DK[4] = {0x1111, 0x1151, 0x0911, 0x1111};      /* kick, per pattern */
 static const uint16_t DS[4] = {0x1010, 0x1010, 0x1010, 0x1010};      /* snare */
+static const uint16_t DO[4] = {0x4444, 0x4444, 0x4444, 0x4444};      /* the open hi-hat, on the offbeats */
+static const uint16_t HATF[6] = {263, 400, 421, 474, 587, 845};
+/* hat, per knob position: pitch x (Q8), high-pass (Q8), decay shift (Q8, 2^-n per sample), level (Q8) */
+static const int32_t HT[5][9] = {{384, 179, 2176, 256, 0, 0, 0, 0, 0}, {320, 154, 2560, 256, 0, 0, 0, 0, 0}, {256, 141, 3072, 256, 0, 0, 0, 0, 0}, {205, 115, 3328, 230, 0, 0, 0, 0, 0}, {154, 90, 3456, 205, 0, 0, 0, 0, 0}};
 static struct {
     int32_t kl, sl, cm, kg, kgain, bg, ng, ha;
     uint32_t fe, fs, kr, ar, bf, bs, br, nr;
 } K;
-static struct { uint32_t tick, step, kph, sph, seed, cl; int32_t kenv, kamp, senv, stn, hlp, nlp; fx_t fx; } D;
+static struct { uint32_t tick, step, kph, sph, seed, cl, hph[6]; int32_t kenv, kamp, senv, stn, hlp, nlp, oenv, hl3; fx_t fx; } D;
 static int32_t d_duck;                          /* the kit presses the others down on every hit (a sidechain) */
 
 static uint32_t rate24(int32_t sh_q8) { uint32_t s16 = (uint32_t)sh_q8 >> 4; return FR24[s16 & 15u] >> (s16 >> 4); }   /* 2^-shift in Q24 */
@@ -218,9 +221,6 @@ static void kmorph(const int32_t (*tab)[9], int32_t x, int32_t *o)    /* each po
     fr = (u * u * (768 - 2 * u)) >> 16;                                   /* smoothstep */
     for (j = 0; j < 9; j++) o[j] = tab[i][j] + (((tab[i + 1][j] - tab[i][j]) * fr) >> 8);
 }
-/* a small echo on the kit: two sixteenths long (at most 0.37 s), it feeds back a little */
-static int16_t kdl[16384] __attribute__((section(".pool")));
-static uint32_t kdp;
 static void kit_block(void)
 {
     int32_t x = (int32_t)P[24], a[9];
@@ -238,6 +238,7 @@ static int32_t drums(void)
     if (D.tick == 0 && a_run && !d_off) {                              /* a 16th: which drums hit */
         st = D.step; D.step = (D.step + 1u) & 15u;
         if (DK[d_pat & 3u] >> st & 1u) { D.kenv = 32767; D.kamp = 32767; D.kph = 0; D.cl = 64u; d_duck = K.kl * 190; }
+        if (DO[d_pat & 3u] >> st & 1u) D.oenv = 32767;
         if (DS[d_pat & 3u] >> st & 1u) { D.senv = 32767; D.stn = 32767; D.sph = 0; if (K.sl * 130 > d_duck) d_duck = K.sl * 130; }
     }
     if (++D.tick >= d_len) D.tick = 0;
@@ -268,18 +269,21 @@ static int32_t drums(void)
         D.senv -= (int32_t)(((int64_t)D.senv * K.nr) >> 24) + (D.senv ? 1 : 0); if (D.senv < 0) D.senv = 0;
     }
     y = yk + ysn;
-    {                                                                  /* DELAY: a small echo of the kit */
-        int32_t dx = (int32_t)ez(P[26]), kt = (int32_t)(2u * d_len), ke, w;
-        kt = kt > 16383 ? 16383 : kt;
-        ke = kdl[(kdp - (uint32_t)kt) & 16383u];
-        w = y + ((ke * (32 + 26 * dx / 127)) >> 7);
-        kdl[kdp & 16383u] = (int16_t)(w > 30000 ? 30000 : w < -30000 ? -30000 : w); kdp++;
-        y += (ke * 64 * dx / 127) >> 7;
+    {                                                 /* HAT: six metal squares and a little air, high-passed, ringing out; the knob moves from a closed tick to a long wash */
+        int32_t h[9], hh = 0, hi;
+        kmorph(HT, P[26] > 4u ? (int32_t)P[26] : 4, h);
+        if (P[26] > 3u && D.oenv) {
+            for (hi = 0; hi < 6; hi++) { D.hph[hi] += (uint32_t)(((uint64_t)HATF[hi] * 331133u * (uint64_t)h[0]) >> 8); hh += (int32_t)(D.hph[hi] >> 31) * 2 - 1; }
+            hh = hh * 1500 + (nz >> 1);
+            D.hl3 += ((hh - D.hl3) * h[1]) >> 8; hh -= D.hl3;
+            y += (int32_t)(((int64_t)hh * D.oenv >> 15) * h[3] * 333 >> 16);
+        }
+        D.oenv -= (int32_t)(((int64_t)D.oenv * rate24(h[2])) >> 24) + (D.oenv ? 1 : 0); if (D.oenv < 0) D.oenv = 0;
     }
     y = fx_run(&D.fx, y, (int32_t)P[27]);                                /* CRUSH */
     y = soft(y);                                                       /* the kit is glued by a soft clip */
     if (d_duck > 0) d_duck -= (d_duck >> 11) + 1;
-    return (y * (int32_t)(VOL[2] + 1u) * 85) >> 12;
+    return (y * (int32_t)(VOL[2] + 1u) * 102) >> 12;
 }
 
 /* ---- WAV: saw + detuned saw + sub square, low-pass, then saturation */
@@ -299,12 +303,13 @@ static int32_t fcoef(uint32_t hz)               /* 2 sin(pi f / 44100) in Q15 (a
 
 /* ---- FM1: a radio. 20 stations hide on a long dial; at every power-on four are drawn, put in new places, and each one sounds a little different.
  * Everything is integers: phases are 32-bit turns, levels Q15, decays are "e -= e * rate >> 24" (RT(ms) gives the rate for a time constant). */
-#define NST 24u
+#define NST 29u
 #define RT(ms) (380449u / (ms))                 /* 2^24 / (44.1 * ms): the per-sample decay rate for a time constant in ms */
 #define MS(ms) ((uint32_t)(ms) * 441u / 10u)    /* ms -> samples */
 #define HZP(h) ((uint32_t)(h) * 97392u)         /* an integer Hz -> a 32-bit phase step */
 static uint32_t hz8p(uint32_t q8) { return (uint32_t)(((uint64_t)q8 * 97392u) >> 8); }   /* Q8 Hz -> phase step */
-static const uint16_t SGQ[NST] = {192, 256, 410, 256, 256, 256, 230, 179, 256, 108, 243, 120, 538, 512, 384, 256, 248, 187, 947, 282, 410, 1408, 61, 282};   /* so that every station is as loud as the others (x256) */
+static const uint16_t SGQ[NST] = {194, 256, 470, 209, 256, 256, 256, 256, 256, 75, 277, 256, 256, 256, 256, 256, 256, 256, 127, 190, 256, 1664, 256, 256, 185, 128, 256, 757, 300};   /* so that every station is as loud as the others (x256) */
+static const uint16_t GH06[128] = {0, 1791, 2715, 3463, 4115, 4705, 5249, 5757, 6238, 6694, 7131, 7551, 7956, 8347, 8727, 9095, 9455, 9805, 10147, 10481, 10809, 11130, 11445, 11755, 12059, 12358, 12652, 12942, 13227, 13508, 13786, 14060, 14330, 14597, 14861, 15122, 15380, 15635, 15887, 16136, 16383, 16628, 16870, 17110, 17348, 17583, 17817, 18048, 18277, 18505, 18731, 18954, 19177, 19397, 19616, 19833, 20048, 20262, 20475, 20686, 20896, 21104, 21311, 21517, 21721, 21924, 22126, 22326, 22525, 22724, 22921, 23117, 23311, 23505, 23698, 23889, 24080, 24270, 24458, 24646, 24833, 25018, 25203, 25387, 25570, 25752, 25934, 26114, 26294, 26473, 26651, 26828, 27005, 27181, 27355, 27530, 27703, 27876, 28048, 28219, 28390, 28560, 28729, 28898, 29066, 29234, 29400, 29566, 29732, 29897, 30061, 30225, 30388, 30550, 30712, 30874, 31034, 31195, 31354, 31513, 31672, 31830, 31988, 32145, 32301, 32457, 32613, 32767};   /* 32768 * (i/127)^0.6: GHOST reaches far from the first turn */
 
 static uint32_t r_seed = 1u;
 static uint32_t rnd32(void) { r_seed = r_seed * 1664525u + 1013904223u; return r_seed; }
@@ -382,8 +387,8 @@ static struct {
     /* 14 train */
     uint32_t trp, tacc, tstep, t80, h349, h440, h19, h19acc; int32_t cl1, cl2, tt1; int32_t tflag; svf_t tcl;
     uint32_t jbv[4], jsv[4];
-    /* 18 truck horn */
-    uint32_t thf, thk, thp[3]; int32_t the, thl;
+    /* 18 truck horn, 24 busy tone, 25 ambulance, 27 knock */
+    uint32_t thf, thk, thp[3], t19, bz1, bz2, abc, aph; int32_t the, thl, dz, k1;
     /* 20 typewriter, 21 clock, 22 wind, 23 neon, and the old speaker */
     uint32_t twn, twt, twl, twd, twr, twp, twdp, twm, wn1, wn2, wn3, nn1, nn2, nfn, nft; int32_t twe, twf, twg, xt1, wnfc, cke; svf_t wnd, vf, vg;
     /* 19 morse */
@@ -711,6 +716,45 @@ static int32_t station2(uint32_t ty)
     return y;
 }
 
+static int32_t station4(uint32_t ty)             /* 24 a busy tone, 25 an ambulance, 27 a knock at a door, 28 a doorbell */
+{
+    int32_t y = 0, nz = (int32_t)rnd32() >> 17;
+    uint32_t n = R.n, m, k;
+    switch (ty) {
+    case 24:                                    /* two notes, half a second on, half a second off */
+        R.bz1 += HZP(480); R.bz2 += HZP(620);
+        if (n % 44100u < 22050u) y = ((sn(R.bz1) + sn(R.bz2)) * 3600) >> 15;
+        break;
+    case 25: {                                  /* pin-pon */
+        R.abc += 115u; if (R.abc >= 4410000u) R.abc -= 4410000u;
+        R.aph += R.abc < 2205000u ? HZP(435) : HZP(580);
+        y = ((sn(R.aph) + (sn(R.aph * 2u) >> 1) + ((sn(R.aph * 3u) * 10) >> 5)) * 3600) >> 15;
+        break; }
+    case 27: {                                  /* three knocks, a pause, three more */
+        static const uint32_t KN[6] = {17640, 39690, 61740, 185220, 207270, 229320};
+        R.k1 += ((nz - R.k1) * 16384) >> 16;
+        m = n % 264600u;
+        for (k = 0; k < 6u; k++) {
+            uint32_t kd = m - KN[k];
+            if (m >= KN[k] && kd < 13230u)
+                y += (int32_t)(((int64_t)sn(kd * HZP(120)) * ex(kd, MS(40)) >> 15) * 9000 >> 15) + (int32_t)(((int64_t)R.k1 * ex(kd, MS(20)) >> 15) * 59 >> 6);
+        }
+        break; }
+    case 28: {                                  /* ding, dong */
+        static const uint32_t DB[4] = {13230, 44100, 176400, 207270};
+        m = n % 352800u;
+        for (k = 0; k < 4u; k++) {
+            uint32_t kd = m - DB[k], df = (k & 1u) ? 523u : 659u;
+            if (m >= DB[k] && kd < 79380u) {
+                int32_t at = kd < 176u ? (int32_t)(kd * 32768u / 176u) : 32768, w = sn(kd * HZP(df)) + ((sn(kd * 2u * HZP(df)) * 10) >> 5);
+                y += (int32_t)(((int64_t)((w * (int64_t)at) >> 15) * ex(kd, MS(500)) >> 15) * 6500 >> 15);
+            }
+        }
+        break; }
+    }
+    return y;
+}
+
 static void morse_build(void)                   /* three groups of five random letters */
 {
     uint32_t g, c, j, k = 0, u = R.mou;
@@ -751,16 +795,22 @@ static int32_t station3(uint32_t ty)
         }
         break; }
     case 15: case 16: case 17: y = jazz(ty); break;                /* old blues, a ballad, ragtime */
-    case 18: {                                  /* a truck horn: a chord of air, two blasts and a silence */
-        uint32_t hc = n % 441000u, on, hf;
-        int32_t hs = 0;
-        on = R.thk ? (hc < 44100u || (hc > 57330u && hc < 149940u)) : (hc < 15435u || (hc > 26460u && hc < 41895u) || (hc > 52920u && hc < 141120u));
-        R.the += (int32_t)((((on ? 32767 : 0) - R.the) * 98) >> 16);
-        hf = R.thf + (uint32_t)(((uint64_t)R.thf * 1311u * (uint32_t)(32768 - R.the)) >> 31);
-        R.thp[0] += hz8p(hf); R.thp[1] += (uint32_t)(((uint64_t)hz8p(hf) * 323u) >> 8); R.thp[2] += (uint32_t)(((uint64_t)hz8p(hf) * 384u) >> 8);
-        for (q = 0; q < 3u; q++) hs += (int32_t)R.thp[q] >> 16;
-        lp(&R.thl, (hs * 1833) >> 15, 22938);
-        y = (int32_t)(((int64_t)R.thl * R.the) >> 15);
+    case 18: {                                  /* a big truck horn, low and heavy, with a diesel idling under it */
+        uint32_t hc = n % 352800u, hf, hb;
+        int32_t sum = 0, x, x2;
+        int on = (hc > 22050u && hc < 105840u) || (hc > 158760u && hc < 273420u);
+        R.the += (((on ? 32767 : 0) - R.the) * 49) >> 15;
+        hf = R.thf + (uint32_t)(((uint64_t)R.thf * 393u * (uint32_t)(32768 - R.the)) >> 30);
+        hb = hz8p(hf);
+        R.thp[0] += hb; R.thp[1] += (uint32_t)(((uint64_t)hb * 323u) >> 8); R.thp[2] += (uint32_t)(((uint64_t)hb * 384u) >> 8);
+        for (q = 0; q < 3u; q++) sum += (int32_t)R.thp[q] >> 16;
+        R.thl += ((int32_t)(((int64_t)sum * 2333) >> 15) - R.thl) >> 2;
+        R.dz += (int32_t)(((int64_t)(nz - R.dz) * 1311) >> 16);
+        R.t19 += HZP(19);
+        x = (int32_t)(((int64_t)R.thl * R.the) >> 15) * 32768 / 9000;          /* tanh, as a rational */
+        x2 = (int32_t)(((int64_t)x * x) >> 15);
+        x = x * ((884736 + x2) >> 4) / ((884736 + 9 * x2) >> 4);              /* 32-bit only: no 64-bit division here */
+        y = (int32_t)(((int64_t)x * 9000) >> 15) + (int32_t)(((int64_t)R.dz * ((int32_t)R.t19 >= 0 ? 896 : 179)) >> 8);
         break; }
     case 20: {                                  /* a typewriter: keys, a bell at the end of the line, the carriage going back */
         int32_t hp, e;
@@ -833,10 +883,10 @@ static void sig_roll(void)                      /* "power on": four stations out
     R = (typeof(R)){0};
     R.n = 0; R.ncyc = -1;
     do {
-        for (i = 0; i < 4u; i++) p[i] = 30 + (int32_t)(rnd16() * 450u >> 16);
+        for (i = 0; i < 4u; i++) p[i] = 4 * (8 + (int32_t)(rnd16() * 112u >> 16));      /* every station sits on a detent of the knob */
         for (i = 1; i < 4u; i++) for (j = i; j > 0 && p[j - 1] > p[j]; j--) { a = p[j]; p[j] = p[j - 1]; p[j - 1] = a; }
     } while ((p[1] - p[0] < 100 || p[2] - p[1] < 100 || p[3] - p[2] < 100) && ++tries < 2000u);
-    { static const uint8_t SC[12] = {0, 2, 10, 9, 14, 12, 18, 7, 20, 21, 22, 23}; for (i = 0; i < 12u; i++) c[i] = SC[i]; }   /* 1930-50, a scene from a film: phone, storm, police car, bell, train, traffic, horn, crowd, typewriter, clock, wind, neon */
+    { static const uint8_t SC[12] = {0, 24, 10, 25, 9, 21, 27, 28, 18, 3, 19, 2}; for (i = 0; i < 12u; i++) c[i] = SC[i]; }   /* 1930-50, a scene from a film: phone, storm, police car, bell, train, traffic, horn, crowd, typewriter, clock, wind, neon */
     for (i = 11u; i > 0; i--) { j = rnd16() * (i + 1u) >> 16; tmp = c[i]; c[i] = c[j]; c[j] = tmp; }
     for (i = 0; i < 4u; i++) { R.pos[i] = p[i]; R.cont[i] = c[i]; }
     for (i = 0; i < 8u; i++) R.dig[i] = (uint8_t)(rnd16() * 10u >> 16);                             /* a new number to dial */
@@ -862,7 +912,7 @@ static void sig_roll(void)                      /* "power on": four stations out
     R.kf0 = rr(52, 90) << 8; R.kstep = (uint32_t)(0xFFFFFFFFu / (uint32_t)MS(rr(9000, 13000)));
     R.hrf = rr(10, 14) << 8; R.hstep = (uint32_t)(0xFFFFFFFFu / (uint32_t)MS(rr(16000, 24000)));
     R.trp = MS(rr(500, 700)); R.tstep = (uint32_t)(0xFFFFFFFFu / (uint32_t)R.trp);
-    R.thf = rr(190, 250) << 8; R.thk = rr(0, 2);
+    R.thf = rr(92, 104) << 8;
     R.mof = rr(560, 740); R.mou = 52920u / rr(12, 20); R.moq_n = 0; R.moi = 0;
     R.sc1 = 500 << 8; R.sc2 = 1500 << 8;
     R.twn = MS(1000); R.twt = 0xF0000000u; R.twd = R.twr = 0xFFFFFFFFu; R.nfn = MS(3000); R.nft = 0xF0000000u;
@@ -913,17 +963,17 @@ static int32_t sig_voice(void)
         int32_t cl = 9830 + (22938 * (int32_t)P[41]) / 127;
         int32_t g = ((R.pw * 3932) >> 15) + (int32_t)(((int64_t)((R.pn * 28836) >> 15) * cl) >> 15);
         ty = R.cont[R.bk];
-        sig = ty < 6u ? station(ty) : ty < 14u ? station2(ty) : station3(ty);
+        sig = ty < 6u ? station(ty) : ty < 14u ? station2(ty) : ty < 24u ? station3(ty) : station4(ty);
         if (!(ty == 6u || (ty >= 15u && ty <= 17u))) {                  /* the same old speaker for every scene: narrow, a little crackle */
             int32_t vl;
             if (rnd16() < 7u) sig += (((int32_t)rnd16() - 32768) * 7000) >> 16;
-            vl = svf(&R.vf, sig, 11000, 5000); sig = vl - svf(&R.vg, vl, 1700, 5000); sig = (sig * 21) >> 4;
+            vl = svf(&R.vf, sig, 11000, 5000); sig = ty == 18u ? vl : vl - svf(&R.vg, vl, 1700, 5000); sig = (sig * 21) >> 4;
         }
         sig = (int32_t)(((int64_t)sig * SGQ[ty] >> 8) * g >> 15);
         x += sig;
     }
     if (gh) {                                                           /* GHOST: the further you push it, the less the radio is a radio */
-        int32_t g = GH125[gh], dl, i0, f2, yy, e1, e2, rg, cs;
+        int32_t g = GH06[gh], dl, i0, f2, yy, e1, e2, rg, cs;
         static uint32_t p37, p51, p11;
         p37 += hz8p(95u); p51 += hz8p(1306u); p11 += hz8p(28u);
         { int64_t w = (int64_t)sn(p37) * (280 * 256) + (int64_t)sn(p51) * (8 * 256);
@@ -933,7 +983,7 @@ static int32_t sig_voice(void)
         yy = gd[(R.gw - i0) & 2047] + (((gd[(R.gw - i0 - 1) & 2047] - gd[(R.gw - i0) & 2047]) * f2) >> 8); R.gw++;
         x = (int32_t)(((int64_t)x * (32768 - g) + (int64_t)yy * g) >> 15);
         R.rp += hz8p((60u + (uint32_t)((340 * (16384 + (sn(p11) >> 1))) >> 15)) * 256u);
-        rg = (int32_t)(((int64_t)g * g >> 15) * 24576 >> 15);                                        /* 0.75 g^2 */
+        rg = (int32_t)(((int64_t)((int64_t)g * g >> 15) * g >> 15) * 24576 >> 15);                                        /* 0.75 g^2 */
         x = (int32_t)(((int64_t)x * (32768 - rg)) >> 15) + (int32_t)(((((int64_t)x * sn(R.rp) >> 15) * rg >> 15) * 45875) >> 15);   /* a metal voice that wanders */
         e1 = gg1[R.gi1]; e2 = gg2[R.gi2];                                                            /* two echoes in an empty room */
         { int32_t w1 = x + (int32_t)(((int64_t)e1 * 18022 >> 15) * g >> 15), w2 = x + (int32_t)(((int64_t)e2 * 16384 >> 15) * g >> 15);
@@ -960,130 +1010,6 @@ static int32_t sig_voice(void)
 static fx_t FXS;
 
 
-/* ---- SFX: a noise machine, like the radio. GHOST and ALIEN: a knob picks the sound (nine each), it keeps coming by itself, on any voice.
-   One table row per sound: ms, Hz start / mid / end, vibrato Hz and per-mille, tremolo Hz and %, wave (0 sine 1 saw 2 square 3 noise), FM ratio x10 and index x10,
-   noise %, two formants (start, end) x2, attack ms, release ms, repeats, gap ms, step (semitone x10) and chance (semitone x10) per repeat, gain %  */
-static const int16_t SFXT[2][9][23] = {
- {
-  {2200,230,190,130,5,20,0,0,0,10,25,8,420,300,800,700,500,700,1,0,0,0,18},
-  {1600,200,200,200,0,0,0,0,3,0,0,100,1800,2800,3200,3600,400,600,1,0,0,0,67},
-  {2600,320,900,280,5,40,0,0,0,10,15,5,500,800,1500,2200,300,700,1,0,0,0,54},
-  {110,320,270,230,0,0,0,0,1,0,0,18,700,800,1200,1100,6,20,6,95,-10,18,54},
-  {1300,55,90,70,0,0,30,60,1,0,0,25,600,900,1400,1800,50,200,1,0,0,0,160},
-  {1000,170,140,110,0,0,0,0,0,10,20,6,300,320,700,650,80,300,1,0,0,0,19},
-  {45,1900,1700,1500,0,0,0,0,0,35,60,25,2500,2500,4000,4000,1,40,7,70,0,60,101},
-  {2800,600,880,540,6,35,0,0,0,0,0,0,0,0,0,0,200,500,1,0,0,0,214},
-  {3200,100,100,100,0,0,0,0,3,0,0,100,300,900,1200,300,900,1200,1,0,0,0,144},
- },
- {
-  {260,3000,900,150,0,0,0,0,1,0,0,0,0,0,0,0,2,40,1,0,0,0,220},
-  {1600,420,780,430,12,120,0,0,0,20,35,0,0,0,0,0,200,400,1,0,0,0,230},
-  {70,900,1300,1700,0,0,0,0,0,0,0,0,0,0,0,0,2,15,6,55,30,15,217},
-  {95,400,560,330,9,50,0,0,1,0,0,4,800,1500,1800,2400,6,25,7,45,0,50,48},
-  {1500,90,1800,2200,0,0,18,40,1,20,50,0,0,0,0,0,20,200,1,0,0,0,320},
-  {310,1300,800,550,0,0,0,0,2,0,0,25,1400,900,2200,1700,4,50,2,60,0,0,32},
-  {120,260,750,500,0,0,0,0,0,0,0,0,0,0,0,0,3,25,4,60,-25,20,213},
-  {14,3000,3000,3000,0,0,0,0,3,0,0,100,2500,2600,4200,4200,1,5,8,50,0,0,53},
-  {3000,92,97,90,0,0,7,45,0,15,35,0,0,0,0,0,300,500,1,0,0,0,279},
- },
-};
-
-static int16_t fdl[16384] __attribute__((section(".pool")));
-static uint32_t fdp;
-static fx_t FXF;
-static struct {
-    int32_t act, last, oct; uint32_t wait, seed, ph, vp, tp, tn, rep, per, durS, att, rel, inv, inva, invr, mrep, sqq, idx, cnt;
-    svf_t a, b; int32_t f1, f2;
-} FX[2];
-
-static uint32_t pow2q(int32_t oq8)              /* 2^(oq8 / 256) in Q16 */
-{
-    int32_t i = oq8 >> 8;
-    uint32_t f = (uint32_t)(oq8 & 255) << 4, p, r;
-    p = 4096u + ((f * (2839u + ((f * (984u + ((f * 227u) >> 12))) >> 12))) >> 12);   /* Q12: 1 + f (0.6931 + f (0.2402 + f 0.0555)) */
-    r = p << 4;
-    return i >= 0 ? r << i : r >> -i;
-}
-static uint32_t fx_rand(uint32_t c) { FX[c].seed = FX[c].seed * 1664525u + 1013904223u; return FX[c].seed >> 8; }
-static void sfx_rep(uint32_t c)                 /* each repeat has its own pitch */
-{
-    const int16_t *Q = SFXT[c][FX[c].idx];
-    int32_t oq = FX[c].oct + (Q[20] * (int32_t)FX[c].rep * 256) / 120 + (((int32_t)(fx_rand(c) % 1001u) - 500) * Q[21] * 256) / 60000;
-    FX[c].mrep = pow2q(oq);
-}
-static void sfx_trig(uint32_t c, uint32_t i)    /* a new sound: its pitch, its length are drawn each time */
-{
-    const int16_t *Q = SFXT[c][i];
-    uint32_t ds = 230u + (((fx_rand(c) & 255u) * 64u) >> 8);
-    FX[c].oct = ((int32_t)(fx_rand(c) % 20u) - 7) * 256 / 12 + octv[6] * 256;
-    FX[c].idx = i;
-    FX[c].durS = ((uint32_t)Q[0] * ds * 441u) / 2560u;
-    FX[c].per = FX[c].durS + ((uint32_t)Q[19] * 441u) / 10u;
-    FX[c].att = ((uint32_t)Q[16] * 441u) / 10u; if (FX[c].att < 1u) FX[c].att = 1u; if (FX[c].att > FX[c].durS / 2u) FX[c].att = FX[c].durS / 2u + 1u;
-    FX[c].rel = ((uint32_t)Q[17] * 441u) / 10u; if (FX[c].rel > FX[c].durS - FX[c].att) FX[c].rel = FX[c].durS - FX[c].att; if (FX[c].rel < 1u) FX[c].rel = 1u;
-    FX[c].inv = (1u << 30) / FX[c].durS; FX[c].inva = (1u << 30) / FX[c].att; FX[c].invr = (1u << 30) / FX[c].rel;
-    FX[c].sqq = pow2q(FX[c].oct / 2);
-    FX[c].tn = 0; FX[c].rep = 0; FX[c].ph = 0; FX[c].vp = 0; FX[c].tp = 0; FX[c].cnt = 0; FX[c].act = 1;
-    sfx_rep(c);
-}
-static int32_t sfx_sample(void)
-{
-    int32_t y = 0, dq, t1, t2, w;
-    uint32_t c;
-    for (c = 0; c < 2u; c++) {
-        const int16_t *Q;
-        int32_t sel = f_off || !P[60u + c] ? -1 : (int32_t)(((uint32_t)P[60u + c] - 1u) * 9u / 127u), o, e, nz, f, u, vs, th;
-        if (sel != FX[c].last) { FX[c].last = sel; if (sel >= 0) { sfx_trig(c, (uint32_t)sel); FX[c].wait = 0; } else FX[c].act = 0; }
-        if (sel < 0) continue;
-        if (!FX[c].act) { if (FX[c].wait) { FX[c].wait--; continue; } sfx_trig(c, (uint32_t)sel); }
-        Q = SFXT[c][FX[c].idx];
-        if (FX[c].tn >= FX[c].durS) {                                     /* the end of a repeat: the gap, or the end of the sound */
-            if (FX[c].rep + 1u >= (uint32_t)Q[18]) { FX[c].act = 0; FX[c].wait = 22050u + fx_rand(c) % 110250u; continue; }
-            if (++FX[c].tn >= FX[c].per) { FX[c].tn = 0; FX[c].rep++; FX[c].ph = 0; sfx_rep(c); }
-            continue;
-        }
-        u = (int32_t)(((uint64_t)FX[c].tn * FX[c].inv) >> 15);             /* 0..32768 along the repeat */
-        if (u < 16384) f = Q[1] + ((Q[2] - Q[1]) * u >> 14); else f = Q[2] + ((Q[3] - Q[2]) * (u - 16384) >> 14);
-        f = (int32_t)(((uint32_t)f * FX[c].mrep) >> 16);
-        FX[c].vp += (uint32_t)Q[4] * 97392u; FX[c].tp += (uint32_t)Q[6] * 97392u;
-        vs = SIN256[FX[c].vp >> 24];
-        f += (f * (Q[5] * vs / 1000)) >> 15;
-        FX[c].ph += (uint32_t)f * 97392u;
-        nz = (int32_t)(fx_rand(c) << 8) >> 16;
-        if (Q[8] == 0) { uint32_t ph2 = (uint32_t)(((uint64_t)FX[c].ph * (uint32_t)Q[9] * 6554u) >> 16); o = sn(FX[c].ph + (uint32_t)Q[10] * (uint32_t)sn(ph2) * 2086u); }
-        else if (Q[8] == 1) o = (int32_t)(FX[c].ph >> 16) - 32768;
-        else if (Q[8] == 2) o = FX[c].ph < 0x80000000u ? 32767 : -32767;
-        else o = 0;
-        th = Q[8] == 3 ? 32768 : Q[11] * 327;
-        o = (o * (32768 - th) + nz * th) >> 15;
-        e = 32768;
-        if (FX[c].tn < FX[c].att) e = (int32_t)(((uint64_t)FX[c].tn * FX[c].inva) >> 15);
-        if (FX[c].durS - FX[c].tn < FX[c].rel) { int32_t er = (int32_t)(((uint64_t)(FX[c].durS - FX[c].tn) * FX[c].invr) >> 15); if (er < e) e = er; }
-        if (e > 32768) e = 32768;
-        if (Q[7]) e = (e * (32768 - ((Q[7] * 327 * (32768 + SIN256[FX[c].tp >> 24])) >> 16))) >> 15;
-        if (Q[12]) {
-            if ((FX[c].tn & 15u) == 0u) {                                  /* the two formants follow the sound (updated every 16 samples) */
-                int32_t g1 = (int32_t)(((uint32_t)(Q[12] + ((Q[13] - Q[12]) * u >> 15)) * FX[c].sqq) >> 16), g2 = (int32_t)(((uint32_t)(Q[14] + ((Q[15] - Q[14]) * u >> 15)) * FX[c].sqq) >> 16);
-                FX[c].f1 = 2 * sn((uint32_t)g1 * 48696u); FX[c].f2 = 2 * sn((uint32_t)g2 * 48696u);
-                if (FX[c].f1 > 30000) { FX[c].f1 = 30000; }
-                if (FX[c].f2 > 30000) { FX[c].f2 = 30000; }
-            }
-            svf(&FX[c].a, (o * 12000) >> 15, FX[c].f1, 1800); svf(&FX[c].b, (o * 12000) >> 15, FX[c].f2, 1800);
-            o = (FX[c].a.band * 48 + FX[c].b.band * 29) >> 3;
-            if (o > 40000) o = 40000; else if (o < -40000) o = -40000;
-        }
-        y += (((o * e) >> 15) * (Q[22] * 52)) >> 15;
-        FX[c].tn++;
-    }
-    dq = ez(P[62]);                                                      /* DELAY: two echoes that feed back, the sounds pile up into a cloud */
-    t1 = fdl[(fdp - 9000u) & 16383u]; t2 = fdl[(fdp - 13300u) & 16383u];
-    w = y + ((((t1 * 77 + t2 * 58) >> 7) * (13 + 102 * dq / 127)) >> 7);
-    fdl[fdp & 16383u] = (int16_t)(w > 30000 ? 30000 : w < -30000 ? -30000 : w); fdp++;
-    y += (((t1 * 128 + t2 * 102) >> 7) * (115 * dq / 127)) >> 7;
-    y = fx_run(&FXF, y, (int32_t)P[63]);
-    y = soft(y);
-    return (y * (int32_t)(VOL[6] + 1u) * 3) >> 8;
-}
 
 static void app_audio(int32_t *out, uint32_t n)
 {
@@ -1098,15 +1024,16 @@ static void app_audio(int32_t *out, uint32_t n)
             lead_block(&LA, 0); lead_block(&LQ, 48); kit_block();
             q_gate = ((uint32_t)step_len * (762u + 14u * P[49])) / 1270u;           /* SEQ STRETCH */
             LA.incb = LA.inc_t;
-            {                                                              /* SEQ WARP: at the top of every loop the pitch dives, then climbs back */
-                uint32_t qb = 32768u;
-                if (sqrun && sqn) {
-                    uint32_t ll = sqn * step_len, lpos = ((LQ.pos + sqn - 1u) % sqn) * step_len + LQ.tick;
-                    int32_t qf = 32767 - (int32_t)((lpos >> 8) * 32767u / (ll >> 8));
-                    if (qf < 0) qf = 0;
-                    qb = 32768u - (uint32_t)(((qf * ez(P[55])) >> 7) >> 1);
+            {                                                              /* SEQ GLIDE: the note slides to the next one */
+                static int32_t qg;
+                int32_t gl = (int32_t)ez(P[55]), d = (int32_t)LQ.inc_t - qg;
+                if (!qg || !gl) qg = (int32_t)LQ.inc_t;
+                else {
+                    int32_t st = (int32_t)(((int64_t)d * rate24(594 + 1552 * gl / 127)) >> 24);
+                    if (!st && d) st = d > 0 ? 1 : -1;
+                    qg += st;
                 }
-                LQ.incb = (uint32_t)(((uint64_t)LQ.inc_t * qb) >> 15);
+                LQ.incb = (uint32_t)qg;
             }
             if (B.seen != b_trig) B.seen = b_trig;
             B.lfo = (B.lfo + 1u) % 1030u;                                  /* MOVE: the bass filter breathes (a slow triangle) */
@@ -1153,7 +1080,7 @@ static void app_audio(int32_t *out, uint32_t n)
             LQ.tick = 0; if (!q_hold) LQ.gate = 0; LQ.pos = 0; q_cur = 255u; q_idx = 255u;
         }
 
-        ya = (lead_sample(&LA, 0, VOL[0]) * 109) >> 7;
+        ya = (lead_sample(&LA, 0, VOL[0]) * 154) >> 7;
         yq = lead_sample(&LQ, 48, VOL[5]);
 
         /* WAV */
@@ -1183,7 +1110,7 @@ static void app_audio(int32_t *out, uint32_t n)
                 if (dv) yb = soft(yb + ((yb * dv) >> 6));
                 yb = fx_run(&B.fx, yb, (int32_t)P[23]);
                 yb = (int32_t)(((int64_t)yb * B.amp * 30) >> 19);
-                yb = (yb * (int32_t)(VOL[1] + 1u) * 3) >> 9;                 /* WAV sits a little lower so the others stay heard */
+                yb = (yb * (int32_t)(VOL[1] + 1u) * 82) >> 13;                 /* WAV sits a little lower so the others stay heard */
             }
         }
 
@@ -1192,7 +1119,7 @@ static void app_audio(int32_t *out, uint32_t n)
         if (!s_off) { ys = sig_voice(); ys = fx_run(&FXS, ys, (int32_t)P[43]); ys = (ys * (int32_t)(VOL[4] + 1u) * 20) >> 9; }
 
         yd = drums();
-        yf = sfx_sample();
+        yf = 0;
         {
             int32_t wl, wr, vl, vr, a0, a1, ml, mr, dry = (int32_t)(((int64_t)(ya + yb + ys + yq) * (32768 - d_duck)) >> 15) + yd + yf;
             uint32_t dt = dlen << 8, di, df;
@@ -1210,20 +1137,16 @@ static void app_audio(int32_t *out, uint32_t n)
             dl[dpos & DMASK] = (int16_t)soft(vl);                          /* soft: past 100% it rings on and on without exploding */
             dr[dpos & DMASK] = (int16_t)soft(vr);
             dpos++;
-            if (sp_hs || sp_na || sp_wa || sp_da || sp_ba) {
-                int32_t nz, b, w, q, d;
+            if (sp_hs || sp_cr || sp_fa || sp_wa || sp_ba) {
+                int32_t nz, w, q;
                 sp_seed = sp_seed * 1664525u + 1013904223u;
                 nz = (int32_t)sp_seed >> 17;
-                svf(&SPF, nz, (int32_t)sp_cf, 7000);
-                b = (SPF.band * (int32_t)sp_na) >> 6;                        /* a band of static */
+                if ((sp_seed >> 4 & 0xFFFFu) < sp_cr) sp_ce = (int32_t)(sp_ca * (2000u + (sp_seed >> 20) * 5000u / 4096u) >> 8);   /* a small crackle */
+                sp_ce -= sp_ce >> 5;
                 sp_wp += sp_wi; q = (int32_t)sp_wp >> 16; q = (q < 0 ? -q : q) * 2 - 32768;
                 w = (soft(q) * (int32_t)sp_wa) >> 15;                        /* a soft ping, far away */
-                sp_d1 += 10713000u; sp_d2 += 10824000u; sp_d3 += 16070000u;   /* the drone: 110 Hz twice (a slow beat) and its fifth */
-                q = (int32_t)sp_d1 >> 16; d = soft((q < 0 ? -q : q) * 2 - 32768);
-                q = (int32_t)sp_d2 >> 16; d += soft((q < 0 ? -q : q) * 2 - 32768);
-                q = (int32_t)sp_d3 >> 16; d += soft((q < 0 ? -q : q) * 2 - 32768) >> 1;
                 sp_bp += sp_bi; q = (int32_t)sp_bp >> 16; q = soft((q < 0 ? -q : q) * 2 - 32768);
-                dry += ((nz * (int32_t)sp_hs) >> 8) + b + w + ((d * (int32_t)sp_da) >> 15) + ((q * (int32_t)sp_ba) >> 15);   /* and a few bleeps */
+                dry += ((nz * (int32_t)sp_hs) >> 8) + ((nz * sp_ce) >> 14) + ((nz * (int32_t)sp_fa) >> 14) + w + ((q * (int32_t)sp_ba) >> 15);
             }
             ml = ((dry + wl + (wl >> 1)) * 19) >> 5;
             mr = ((dry + wr + (wr >> 1)) * 19) >> 5;
@@ -1276,14 +1199,15 @@ static void draw_img(const img_t *m, uint32_t x, uint32_t y, uint32_t k)
     lcd_sync();
 }
 
-/* slow, like a title sequence: the logo rises out of the static in waves, LOST SIGNAL follows, and it stays lit. {time ms, brightness 0..256}, linear in between */
-static const uint16_t LG[][2] = {{0, 0}, {700, 0}, {1300, 25}, {1600, 10}, {2100, 55}, {2400, 30}, {3000, 100}, {3300, 75}, {3800, 150},
-                                 {4100, 120}, {4600, 200}, {4900, 170}, {5300, 256}, {9700, 256}};
-static const uint16_t TG[][2] = {{0, 0}, {4200, 0}, {4700, 90}, {5000, 30}, {5400, 170}, {5700, 70}, {6100, 256}, {9700, 256}};
-static const uint16_t PINGS[5] = {2600, 3300, 4000, 4800, 5600};   /* soft pings, a slow arpeggio that comes with LOST SIGNAL */
-static const uint16_t PING_HZ[5] = {330, 494, 659, 587, 440};
-static const uint16_t BIPS[5][4] = {{6300, 50, 1320, 2000}, {6750, 50, 1320, 2000}, {7500, 40, 990, 1700}, {8200, 50, 1320, 2000}, {8550, 140, 1760, 1700}};   /* time, length ms, Hz, level */
-#define SPLASH_MS 9700u                         /* the sound fades from 8.4 s to 9.2 s, then half a second of silence, then the screen */
+/* the start-up: a signal hunted across the screen (noisy, then clean when found), the neon logo catches, LOST SIGNAL blinks slowly.
+   {time ms, brightness 0..256}, linear in between; the sound follows the picture: silence on the flat line, a bleep on the spike, crackles, a hiss */
+static const uint16_t LG[][2] = {{0, 0}, {2640, 0}, {2720, 140}, {2790, 10}, {2990, 200}, {3080, 60}, {3340, 256}, {7400, 256}};
+static const uint16_t TG[][2] = {{0, 0}, {3740, 0}, {4040, 110}, {4340, 10}, {4690, 90}, {4940, 15}, {5340, 256}, {7400, 256}};
+static const uint16_t PINGS[3] = {3550, 4400, 5250};   /* soft pings, a slow arpeggio that comes with LOST SIGNAL */
+static const uint16_t PING_HZ[3] = {330, 494, 659};
+static const uint16_t FLK[4] = {2720, 2990, 3080, 3340};   /* the neon catching: a burst of static each time */
+static const uint16_t BIPS[2][4] = {{1300, 90, 1320, 32000}, {2250, 70, 1320, 16000}};   /* time, length ms, Hz, level: on the spike, and a lighter one after */
+#define SPLASH_MS 7400u
 
 static uint32_t keyf(const uint16_t (*tb)[2], uint32_t n, uint32_t t)    /* brightness at time t */
 {
@@ -1296,29 +1220,23 @@ static uint32_t keyf(const uint16_t (*tb)[2], uint32_t n, uint32_t t)    /* brig
     return tb[n - 1][1];
 }
 
-static void splash_snd(uint32_t t)              /* the sound: a deep drone that swells, faint static, soft pings */
+static void splash_snd(uint32_t t)              /* the sound, set from the picture's clock */
 {
-    static uint32_t cell = ~0u, rs = 7u;
-    static uint32_t hsb;
-    uint32_t i, w = 0, hz = 0, da, fa = t < 8400u ? 256u : t < 9200u ? 256u * (9200u - t) / 800u : 0u;   /* the fade-out of the static and the drone */
-    if (t / 120u != cell) {                     /* the static changes level every 120 ms, with dropouts */
-        cell = t / 120u; rs = rs * 1664525u + 1013904223u;
-        hsb = t < 300u ? 0u : (rs >> 16 & 7u) < 2u ? 0u : 6u + (rs >> 20 & 15u) * (t < 3000u ? 1u : 2u) / 2u;
-    }
-    sp_hs = hsb * fa >> 8;
-    sp_cf = (uint32_t)CUT_F[70u + (t >> 7 & 7u)];
-    sp_na = t < 300u ? 0u : 8u * fa >> 8;
-    da = t < 300u ? 0u : t < 5600u ? (t - 300u) * 3800u / 5300u : 3800u;
-    sp_da = da * fa >> 8;
-    for (i = 0; i < 5u; i++)
+    uint32_t i, w = 0, hz = 0, fo = t < 200u ? t * 256u / 200u : t < 3200u ? 256u : t < 5600u ? 256u - (t - 3200u) * 179u / 2400u : t < 6000u ? 77u * (6000u - t) / 400u : 0u, fa = 0;
+    sp_hs = (t < 1300u ? 26u : 16u) * fo >> 8;
+    sp_cr = (t < 1300u ? 21u : 9u); sp_ca = fo * 2u;
+    for (i = 0; i < 4u; i++)
+        if (t >= FLK[i] && t < FLK[i] + 40u) { uint32_t d = 40u - (t - FLK[i]); fa += 3500u * 2u * d * d / 1600u; }
+    sp_fa = fa;
+    for (i = 0; i < 3u; i++)
         if (t >= PINGS[i] && t < PINGS[i] + 800u) {
             uint32_t d = t - PINGS[i];
-            w = d < 40u ? d * 40u : 1600u * (800u - d) / 760u;
+            w = (d < 40u ? d * 40u : 1600u * (800u - d) / 760u) * 16u / 5u;
             hz = PING_HZ[i];
         }
     sp_wa = w; sp_wi = 97392u * hz;
-    hz = 0; w = 0;                              /* the bleeps: short, irregular, mostly towards the end */
-    for (i = 0; i < 5u; i++)
+    hz = 0; w = 0;
+    for (i = 0; i < 2u; i++)
         if (t >= BIPS[i][0] && t < BIPS[i][0] + BIPS[i][1] + 15u) {
             uint32_t d = t - BIPS[i][0];
             hz = BIPS[i][2];
@@ -1327,22 +1245,92 @@ static void splash_snd(uint32_t t)              /* the sound: a deep drone that 
     sp_bi = 97392u * hz; sp_ba = w;
 }
 
-static void splash(void)                        /* ARP WAV 09: a signal found slowly in the static, then it holds a moment */
+/* the oscilloscope trace: a flat noisy line, then the signal jumps up and settles; it stays behind the title, faint, and goes out slowly */
+static uint8_t sc_a[240], sc_b[240];
+static uint32_t sc_head, sc_fade, sc_dy;
+static void scope_calc(uint32_t t)
 {
-    uint32_t t0 = fm1_ms, t, dl_ = ~0u, dt_ = ~0u, kl, kt, tl = 0;
+    uint32_t x, tq = t / 80u;
+    int32_t prev = 120, e = 86 << 8, ph = 0;
+    sc_head = t < 1300u ? t * 92u / 1300u : 92u + (t - 1300u) * 148u / 740u;
+    if (sc_head > 239u) sc_head = 240u;
+    sc_fade = t < 2040u ? 256u : t < 2440u ? 256u - 171u * (t - 2040u) / 400u : t < 4000u ? 85u : t < 5800u ? 85u * (5800u - t) / 1800u : 0u;
+    for (x = 0; x < 240u && x <= sc_head; x++) {
+        int32_t y;
+        if (x < 92u) {
+            uint32_t h = (x * 2654435761u) ^ (tq * 40503u * 7919u);
+            y = 120 + ((((int32_t)(h >> 13 & 255u) - 128) * 13) >> 11);
+        } else {
+            y = 120 - (int32_t)(((int64_t)((2 << 8) + e) * sn((uint32_t)ph)) >> 23);
+            ph += 150384360; e = (e * 3929) >> 12;
+        }
+        sc_a[x] = (uint8_t)(y < prev ? y : prev); sc_b[x] = (uint8_t)(y > prev ? y : prev); prev = y;
+    }
+    sc_dy = (uint32_t)prev;
+}
+
+static void splash_overlay(const img_t *m, int32_t x, int32_t y, uint32_t k, int32_t by)    /* the title over the trace, in the band that starts at row by */
+{
+    int32_t r, c, bg = C_BG, br = bg >> 11, bgn = (bg >> 5) & 63, bb = bg & 31;
+    for (r = 0; r < m->h; r++) {
+        if (y + r < by || y + r >= by + 90) continue;
+        for (c = 0; c < m->w; c++) {
+            uint32_t p = m->px[r * m->w + c];
+            if (p == (uint32_t)bg) continue;                                   /* clear: the trace shows through */
+            { int32_t rr = (int32_t)(p >> 11), gg = (int32_t)(p >> 5 & 63u), b = (int32_t)(p & 31u);
+              rr = br + (((rr - br) * (int32_t)k) >> 8); gg = bgn + (((gg - bgn) * (int32_t)k) >> 8); b = bb + (((b - bb) * (int32_t)k) >> 8);
+              cv_px[(uint32_t)((y + r - by) * 240 + x + c)] = swap16((uint16_t)(rr << 11 | gg << 5 | b)); }
+        }
+    }
+}
+
+static void splash_draw(uint32_t kl, uint32_t kt)
+{
+    uint32_t band, x, kf = sc_fade * 230u >> 8, tc, wc;
+    tc = RGB(9 + (131 * kf >> 8), 11 + (219 * kf >> 8), 32 + (223 * kf >> 8)); wc = RGB(9 + (246 * sc_fade >> 8), 11 + (244 * sc_fade >> 8), 32 + (223 * sc_fade >> 8));
+    for (band = 0; band < 2u; band++) {
+        int32_t by = 30 + (int32_t)band * 90;
+        cv_begin(240, 90, C_BG);
+        if (sc_fade)
+            for (x = 0; x < 240u && x <= sc_head; x++) {
+                int32_t y;
+                for (y = sc_a[x]; y <= sc_b[x]; y++)
+                    if (y >= by && y < by + 90) cv_px[(uint32_t)(y - by) * 240u + x] = swap16((uint16_t)tc);
+            }
+        if (sc_fade && sc_head < 240u) {                                           /* the bright head of the trace */
+            int32_t dx, dy;
+            for (dy = -1; dy <= 1; dy++)
+                for (dx = 0; dx < 3; dx++) {
+                    int32_t yy = (int32_t)sc_dy + dy, xx = (int32_t)sc_head + dx;
+                    if (xx < 240 && yy >= by && yy < by + 90) cv_px[(uint32_t)(yy - by) * 240u + (uint32_t)xx] = swap16((uint16_t)wc);
+                }
+        }
+        splash_overlay(&IMG_LOGO, (240 - IMG_LOGO.w) / 2, LOGO_Y, kl, by);
+        splash_overlay(&IMG_TAG, (240 - IMG_TAG.w) / 2, TAG_Y, kt, by);
+        cv_blit(0, (uint32_t)by);
+        lcd_sync();
+    }
+}
+
+static void splash(void)                        /* ARP WAV 09: a signal hunted across the screen, found, then the neon lights */
+{
+    uint32_t t0 = fm1_ms, t, tl = 0, lkl = ~0u, lkt = ~0u, lhd = ~0u, lfd = ~0u, ltq = ~0u, kl, kt;
     lcd_fill(0, 0, 240, 240, C_BG);
     do {
         t = fm1_ms - t0;
         platform_poll();
         splash_snd(t);
-        if (t - tl >= 40u) {                    /* the picture follows every 40 ms (no faster: the glow rises, it does not flicker) */
+        if (t - tl >= 40u) {                    /* the picture follows every 40 ms */
             tl = t;
+            scope_calc(t);
             kl = keyf(LG, sizeof LG / sizeof LG[0], t) & ~3u; kt = keyf(TG, sizeof TG / sizeof TG[0], t) & ~3u;
-            if (kl != dl_) { dl_ = kl; draw_img(&IMG_LOGO, (240u - IMG_LOGO.w) / 2u, LOGO_Y, kl); }
-            if (kt != dt_) { dt_ = kt; draw_img(&IMG_TAG, (240u - IMG_TAG.w) / 2u, TAG_Y, kt); }
+            if (kl != lkl || kt != lkt || sc_head != lhd || sc_fade != lfd || (sc_fade && t / 80u != ltq)) {
+                lkl = kl; lkt = kt; lhd = sc_head; lfd = sc_fade; ltq = t / 80u;
+                splash_draw(kl, kt);
+            }
         }
     } while (t < SPLASH_MS);
-    sp_hs = sp_na = sp_wa = sp_da = sp_ba = 0;
+    sp_hs = sp_cr = sp_fa = sp_wa = sp_ba = 0;
     lcd_fill(0, 0, 240, 240, C_BG);
 }
 
@@ -1379,16 +1367,16 @@ static void draw_battery(uint32_t raw)          /* top right: a battery with fou
 #define C_SEQ RGB(255, 194, 236)
 #define C_SFX RGB(154, 72, 232)
 static const uint16_t VCOL[7] = {C_ARP, C_WAV, C_KIT, C_VOX, C_FM1, C_SEQ, C_SFX};
-static const uint8_t VORD[6] = {0, 1, 5, 2, 6, 4};              /* the PRESETS knob, left to right: ARP WAV SEQ KIT SFX FM1 */
+static const uint8_t VORD[5] = {0, 1, 5, 2, 4};                 /* the PRESETS knob, left to right: ARP WAV SEQ KIT FM1 */
 static const uint8_t PGN[7] = {2, 2, 1, 1, 1, 2, 1};               /* pages per voice */
 static const uint8_t UIMAP[7][2][4] = {{{0, 2, 3, 5}, {6, 1, 8, 11}}, {{12, 17, 18, 15}, {14, 19, 20, 23}}, {{24, 25, 26, 27}}, {{36, 37, 38, 39}}, {{40, 41, 42, 43}}, {{48, 50, 51, 54}, {49, 55, 56, 59}}, {{60, 61, 62, 63}}};
 static const char *const UINAME[7][2][4] = {
     {{"CUTOFF", "ENV MOD", "DECAY", "RANGE"}, {"DELAY", "STRETCH", "FM", "CRUSH"}},
     {{"CUTOFF", "DRIVE", "DELAY", "MOVE"}, {"DETUNE", "WARP", "FM", "CRUSH"}},
-    {{"KICK", "SNARE", "DELAY", "CRUSH"}, {"", "", "", ""}},
+    {{"KICK", "SNARE", "HAT", "CRUSH"}, {"", "", "", ""}},
     {{"VOWEL", "ROBOT", "DELAY", "CRUSH"}, {"", "", "", ""}},
     {{"TUNE", "FINE", "GHOST", "CRUSH"}, {"", "", "", ""}},
-    {{"CUTOFF", "ENV MOD", "DECAY", "DELAY"}, {"STRETCH", "WARP", "FM", "CRUSH"}},
+    {{"CUTOFF", "ENV MOD", "DECAY", "DELAY"}, {"STRETCH", "GLIDE", "FM", "CRUSH"}},
     {{"GHOST", "ALIEN", "DELAY", "CRUSH"}, {"", "", "", ""}}};
 
 static void draw_knob(uint32_t y, uint32_t v, uint16_t col, const char *name)
@@ -1540,7 +1528,7 @@ static void app_main(void)
         }
 
         if (b & (1u << BTN_REC) && tg == 5u && !sqrun) q_rec ^= 1u;
-        if (b & (1u << BTN_HOME)) { a_mask = 0; b_gate = 0; d_off = 1; s_off = 1; f_off = 1; sqrun = 0; sqn = 0; sqc = 0; q_rec = 0; }
+        if (b & (1u << BTN_HOME)) { a_mask = 0; b_gate = 0; d_off = 1; s_off = 1; sqrun = 0; sqn = 0; sqc = 0; q_rec = 0; }
         if (b & (1u << BTN_SEL)) {
             if (tg == 5u) { if (sqn) sqn--; sqc = sqn % 16u; if (!sqn) sqrun = 0; }   /* SEQ: delete the last step */
             else {                              /* the kit lets go of the tempo, or follows it again */
@@ -1553,9 +1541,9 @@ static void app_main(void)
         if (b & (1u << BTN_OCT_DOWN) && octv[tg] > -1) octv[tg]--;
         if (b & (1u << BTN_OCT_UP) && octv[tg] < 1) octv[tg]++;
 
-        if ((e = fm1_enc_take(ENC_PRESETS)) != 0) {   /* left to right: ARP WAV SEQ KIT SFX FM1 */
+        if ((e = fm1_enc_take(ENC_PRESETS)) != 0) {   /* left to right: ARP WAV SEQ KIT FM1 */
             int32_t t = (int32_t)set.pos + (e > 0 ? 1 : -1);
-            t = t < 0 ? 0 : t > 5 ? 5 : t;
+            t = t < 0 ? 0 : t > 4 ? 4 : t;
             if ((uint8_t)t != set.pos) { set.page = 0; q_rec = 0; }      /* every voice starts on page A */
             set.pos = (uint8_t)t; set.tgt = VORD[t]; tg = set.tgt;
         }
@@ -1564,7 +1552,6 @@ static void app_main(void)
             if ((e = fm1_enc_take(ENC_KNOB1 + k)) != 0) {
                 int32_t x;
                 if (tg == 2u) d_off = 0;
-                if (tg == 6u) f_off = 0;
                 if (tg == 4u) {
                     if (!r_rolled) { r_seed ^= fm1_ticks() * 2654435761u ^ (fm1_ms << 11) ^ (uint32_t)fm1_adc_read(FM1_ADC_BATT); rnd32(); sig_roll(); r_rolled = 1; }   /* power-on: four stations, new places */
                     s_off = 0;
