@@ -1,0 +1,14 @@
+name: mutant.cloud
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: konsumer/mutantcloud@main
