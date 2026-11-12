@@ -319,7 +319,7 @@ def main():
         BOARD_PREFIX[BOARD] = BOARD_PREFIX[BOARD].replace(MODELS["pro"], MODELS[model])
         suffix += "-" + model
     PRODUCT = BOARD_PREFIX[BOARD] + "0"
-    name = f"dinghy-{suffix}.fwsc"
+    name = f"dinghy{suffix}.fwsc"
     if a.release:                   # one digit each: the identity has room for two (X.Y; a .Z only in the text)
         m = re.fullmatch(r"(\d)\.(\d)(\.\d)?(-[A-Za-z0-9]+)?", a.release)
         if not m:
