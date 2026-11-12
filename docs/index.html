@@ -1532,7 +1532,7 @@ var VOICES = [
     st.appendChild(b);
   });
   var RED = "#ff2f7d";
-  var KEYS = { ARP: [/(?<![A-Za-zÀ-ÿ0-9])(FX|A|B)(?![A-Za-zÀ-ÿ0-9])/g, "var(--arp)"], WAV: [/(?<![A-Za-zÀ-ÿ0-9])(B|PRESET)(?![A-Za-zÀ-ÿ0-9])/g, "var(--wav)"], SEQ: [/(?<![A-Za-zÀ-ÿ0-9])(REC|PLAY)(?![A-Za-zÀ-ÿ0-9])/g, RED], KIT: [/(?<![A-Za-zÀ-ÿ0-9])(BPM|SELECT|HOME)(?![A-Za-zÀ-ÿ0-9])/g, "var(--kit)"], X02: [/(?<![A-Za-zÀ-ÿ0-9])(Ghost|Alien)(?![A-Za-zÀ-ÿ0-9])/g, "var(--sfx)"], A09: [/(?<![A-Za-zÀ-ÿ0-9])(TUNE|FINE|GHOST|Ghost)(?![A-Za-zÀ-ÿ0-9])/g, "var(--fm1)"] };
+  var KEYS = { ARP: [/(?<![A-Za-zÀ-ÿ0-9])(FX|A|B)(?![A-Za-zÀ-ÿ0-9])/g, "var(--arp)"], WAV: [/(?<![A-Za-zÀ-ÿ0-9])(B|PRESETS?)(?![A-Za-zÀ-ÿ0-9])/g, "var(--wav)"], SEQ: [/(?<![A-Za-zÀ-ÿ0-9])(REC|PLAY)(?![A-Za-zÀ-ÿ0-9])/g, RED], KIT: [/(?<![A-Za-zÀ-ÿ0-9])(BPM|SELECT|HOME)(?![A-Za-zÀ-ÿ0-9])/g, "var(--kit)"], X02: [/(?<![A-Za-zÀ-ÿ0-9])(Ghost|Alien)(?![A-Za-zÀ-ÿ0-9])/g, "var(--sfx)"], A09: [/(?<![A-Za-zÀ-ÿ0-9])(TUNE|FINE|GHOST|Ghost)(?![A-Za-zÀ-ÿ0-9])/g, "var(--fm1)"] };
   function paint(t, id) {
     t = brand(t);
     t = t.replace(/(?<![A-Za-zÀ-ÿ0-9])(ARP|WAV|SEQ|KIT|X02|A09|Arp|Wav)(?![A-Za-zÀ-ÿ0-9])/g, function (m) { var k = m.toUpperCase(); return '<span style="color:var(--' + k.toLowerCase() + ')">' + m + '</span>'; });
@@ -1633,22 +1633,22 @@ var EN = {
 var VOICES_EN = {
   ARP: { tag: "Arpeggiator", p: ["Turn the FM-1 on, you’re on the ARP voice. Put your fingers on the FM-1’s keys, the Arpeggiator plays by itself. Turn the FM-1’s knobs. You’ll see the effect sliders move. At the same time, the sound of your FM-1 will change. Shape the sound, and once part A suits you, press the FX button, which opens part B. Same thing as for A, shape the sound, and you’ll notice that on this part the sound gets more and more interesting for your ears. If you’re floating very high, that’s normal, it’s the magic of the Arpeggiator."],
     tip: "Note: ARP sounds good even without music theory. You can press several keys at random, let yourself be surprised. But of course you can also look for a particular harmony. The keys you pressed to form the Arp stay lit." },
-  WAV: { tag: "Drone", p: ["Switch to the WAV voice by turning the PRESET knob, play the notes freely, there’s no recording here, experiment and above all don’t rush: the sound goes on forever until you press another key. The tension builds, and seems to balance the Arp, which keeps hypnotizing you. If you go to part B, the sound takes you to a completely different dimension, you’ll feel like you’re piloting a spaceship. But be careful, there may be heavy turbulence. Don’t hesitate to push the sliders, the crossing will be more chaotic. No problem, at any moment you can come back to calmer waters. But let’s stay with what ARP and WAV produce."],
+  WAV: { tag: "Drone", p: ["Switch to the WAV voice by turning the PRESETS knob, play the notes freely, there’s no recording here, experiment and above all don’t rush: the sound goes on forever until you press another key. The tension builds, and seems to balance the Arp, which keeps hypnotizing you. If you go to part B, the sound takes you to a completely different dimension, you’ll feel like you’re piloting a spaceship. But be careful, there may be heavy turbulence. Don’t hesitate to push the sliders, the crossing will be more chaotic. No problem, at any moment you can come back to calmer waters. But let’s stay with what ARP and WAV produce."],
     tip: "Look, the keys that make up your Arp are always lit. Press the first key and you’ll be in harmony with the Arp. Let it ring, then press another of the lit keys." },
   SEQ: { tag: "Sequencer", p: [
-    "Switch to the SEQ voice. Press the FM-1’s keys and look for a nice sequence. Got it? Ok, press REC and fill the sequencer’s steps. No need to fill them all. When you stop, press PLAY and the sequence starts. Turn the knobs. Like the ARP voice, you can shape the sound however you like.",
+    "Switch to the SEQ voice. Press the FM-1’s keys and look for a nice sequence. Got it? OK, press REC and fill the sequencer’s steps. No need to fill them all. When you stop, press PLAY and the sequence starts. Turn the knobs. Like the ARP voice, you can shape the sound however you like.",
     "You can go back to the WAV voice and bring in tension, as I explained earlier. You can also go straight to KIT. Conveniently, it’s the next voice."],
     tip: "Don’t hesitate to play with the BPM (SELECT), it’s always very effective for making a sequence evolve." },
   KIT: { tag: "Drum", p: [
-    "Ok, now switch to KIT. There’s no classic sequencer here, as you’d expect from a drum voice. There’s just a Kick, a Snare and a Hi-Hat. KIT is there to beat the rhythm. A bit of Crush if you wish. You’ll notice that KIT automatically follows the BPM of the other parts.",
+    "OK, now switch to KIT. There’s no classic sequencer here, as you’d expect from a drum voice. There’s just a Kick, a Snare and a Hi-Hat. KIT is there to keep the beat. A bit of Crush if you wish. You’ll notice that KIT automatically follows the BPM of the other parts.",
     ],
     tip: "Mix the three elements of each kit with the knobs to produce a kit with an original sound." },
   X02: { tag: "Ghost, Alien", p: [
-    "X02? Ghost, Alien. Ok, here the sound really comes from elsewhere. Turn the knobs, and listen. There are supernatural presences in Arp Wav 09. Delay and Crush will transform the sound of these friendly characters.",
-    "Generate noises from elsewhere. Arp Wav 09 is the ideal FirmWare for listening to ghosts and aliens, don’t you think?"],
+    "X02? Ghost, Alien. OK, here the sound really comes from elsewhere. Turn the knobs, and listen. There are supernatural presences in Arp Wav 09. Delay and Crush will transform the sound of these friendly characters.",
+    "Generate sounds from elsewhere. Arp Wav 09 is the ideal FirmWare for listening to ghosts and aliens, don’t you think?"],
     tip: "Something tells me X02 should go rather well with the WAV B voice." },
   A09: { tag: "Ghost Radio", p: [
-    "And I’ll finish with A09. For this voice, don’t try to play the FM-1’s keys, they’re disabled. Just turn the knobs. What is it? Well, it’s an old radio. Sweep the frequency with TUNE, if something catches you, fine-tune with FINE, and you’ll discover hidden sounds. Ghost? Yes, the radio can become a ghost radio. A little Crush will transform what you’ve found."],
+    "And I’ll finish with A09. For this voice, don’t try to play the FM-1’s keys, they’re disabled. Just turn the knobs. What is it? Well, it’s an old radio. Sweep the frequency with TUNE, if something catches your ear, fine-tune with FINE, and you’ll discover hidden sounds. Ghost? Yes, the radio can become a ghost radio. A little Crush will transform what you’ve found."],
     tip: "Just have fun if you like, but you can also use A09 as a texture generator. It goes particularly well with ARP, you’ll see." }
 };
 var PAGE_EN = { lang: "en", aria: "My YouTube channel", fm1: "Five voices" };
