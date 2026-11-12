@@ -1673,7 +1673,7 @@ var PAGE_EN = { lang: "en", aria: "My YouTube channel", fm1: "Five voices" };
   [].forEach.call(document.querySelectorAll(".lang button"), function (b) { b.addEventListener("click", function () { var l = b.getAttribute("data-l"); apply(l); try { localStorage.setItem("lang", l); } catch (e) {} }); });
   emu.addEventListener("load", sendLang);
   var saved = null; try { saved = localStorage.getItem("lang"); } catch (e) {}
-  if (saved === "en") setTimeout(function () { apply("en"); }, 0);
+  if (saved !== "fr") setTimeout(function () { apply("en"); }, 0);   /* English first, unless the visitor chose French */
 })();
 </script>
 </body>
