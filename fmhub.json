@@ -1,9 +1,8 @@
-	
-what	"Minimalist, instinctive FirmWare: no menu, no sound presets, everything is played with the knobs. Six voices to play alone or chain together: ARP, WAV drone, SEQ, KIT drums, X02 ghost and alien noises, A09 ghost radio."
-author	"Wav.09.02"
-kinds	
-0	"synth"
-1	"groove"
-play	"https://wav0902.github.io/wav-fm1/"
-image	"docs/card.jpg"
-color	"#ff7dcd"
+{
+  "what": "Minimalist, instinctive FirmWare: no menu, no sound presets, everything is played with the knobs. Six voices to play alone or chain together: ARP, WAV drone, SEQ, KIT drums, X02 ghost and alien noises, A09 ghost radio.",
+  "author": "Wav.09.02",
+  "kinds": ["synth", "groove"],
+  "play": "https://wav0902.github.io/wav-fm1/",
+  "image": "docs/card.jpg",
+  "color": "#ff7dcd"
+}
