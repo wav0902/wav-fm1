@@ -28,7 +28,7 @@ a { color: inherit; }
 button { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--fm1); outline-offset: 3px; }
 
-.top { display: flex; justify-content: space-between; align-items: center; gap: 16px; color: var(--dim); font: 400 14px var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+.top { display: flex; justify-content: space-between; align-items: center; gap: 16px; color: var(--dim); font: 400 14px var(--mono); letter-spacing: .14em; }
 .top .led { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--fm1); box-shadow: 0 0 12px var(--fm1); margin-right: 10px; animation: blink 3.2s steps(1) infinite; }
 @keyframes blink { 0%, 86%, 100% { opacity: 1; } 90%, 96% { opacity: .15; } }
 
@@ -156,7 +156,7 @@ footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8p
 </head>
 <body>
 <main>
-  <div class="top"><span><span class="led"></span><span data-i="top">Firmware M-VAVE FM-1</span></span><span class="right"><span class="lang" role="group" aria-label="Langue / Language"><button type="button" data-l="fr" aria-pressed="true">FR</button><span aria-hidden="true">/</span><button type="button" data-l="en" aria-pressed="false">EN</button></span><span class="brand"><span style="color:var(--arp)">ARP</span> <span style="color:var(--wav)">WAV</span> <span style="color:var(--fm1)">09</span></span></span></div>
+  <div class="top"><span><span class="led"></span><span data-i="top">FirmWare <span style="color:var(--fm1)">M-Vave-Fm-1</span></span></span><span class="right"><span class="lang" role="group" aria-label="Langue / Language"><button type="button" data-l="en" aria-pressed="true">En</button><span aria-hidden="true">/</span><button type="button" data-l="fr" aria-pressed="false">Fr</button></span><span class="brand"><span style="color:var(--arp)">ARP</span> <span style="color:var(--wav)">WAV</span> <span style="color:var(--fm1)">09</span></span></span></div>
 
   <header class="hero">
     <div>
@@ -166,7 +166,7 @@ footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8p
         <p data-i="i3">C’est un FirmWare instinctif, qui va à l’essentiel. J’ai volontairement désactivé plusieurs touches. Tout se joue avec les knobs. Aucun menu, ni sous menu, ni fonction superflue. Tu as six voix que tu peux jouer séparément, ou les relier entre elles.<br>Aucun preset de son. Tu modules le signal, et tu sculptes le son en temps réel.</p>
         <p class="five" data-i="i4">Six voix.<br><span style="color:var(--arp)">ARP</span> / <span style="color:var(--wav)">WAV</span> / <span style="color:var(--seq)">SEQ</span> / <span style="color:var(--kit)">KIT</span> / <span style="color:var(--sfx)">X02</span> / <span style="color:var(--fm1)">A09</span>.</p>
         <div class="cta">
-          <a class="btn main" id="l-hub" href="#" hidden data-i="hub">Installer sur FM-1</a>
+          <a class="btn main" id="l-hub" href="#" hidden data-i="hub">Installer sur Fm-1</a>
           <span class="hubtag"><span style="color:var(--arp);font-weight:700">The Firmware Hub</span> / Make Firmware not War</span>
         </div>
       </div>
@@ -183,7 +183,7 @@ footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8p
   </section>
 
   <section id="essayer" class="try" aria-labelledby="t-essayer">
-    <div class="sec-head"><div><p class="kicker" data-i="k2">Dans le navigateur</p><h2 id="t-essayer" data-i="h2">Le FM-1, sans le FM-1.</h2></div></div>
+    <div class="sec-head"><div><p class="kicker" data-i="k2">Dans le navigateur</p><h2 id="t-essayer" data-i="h2">Le Fm-1, sans le Fm-1.</h2></div></div>
     <div class="frame"><iframe id="emu" scrolling="no" srcdoc="&lt;!doctype html&gt;
 &lt;html lang=&quot;fr&quot;&gt;
 &lt;head&gt;
@@ -195,7 +195,7 @@ footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8p
 &lt;meta name=&quot;claude:viewport-fit-sides&quot; content=&quot;cover&quot;&gt;
 &lt;link rel=&quot;stylesheet&quot; href=&quot;https://fonts.googleapis.com/css2?family=Share+Tech+Mono&amp;family=Barlow+Condensed:wght@500;600&amp;family=Nunito:wght@700;800&amp;family=Special+Elite&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap&quot;&gt;
 &lt;style&gt;
-/* Layout: the FM-1 drawn from its photo (1000 x 613): knobs top, screen centre, 12 buttons right, 27 keys along the bottom.
+/* Layout: the Fm-1 drawn from its photo (1000 x 613): knobs top, screen centre, 12 buttons right, 27 keys along the bottom.
    Colours are sampled from that photo. The page around it is a dark ground. */
 :root {
   color-scheme: dark;
@@ -312,12 +312,12 @@ h1 .a { color: var(--acc); } h1 .w { color: var(--bass); } h1 .n { color: var(--
   &lt;/div&gt;
 
   &lt;div class=&quot;row2&quot;&gt;
-    &lt;button class=&quot;go&quot; id=&quot;start&quot;&gt;FM-1 OFF&lt;/button&gt;
-    &lt;span class=&quot;hint&quot; id=&quot;hint&quot;&gt;Allume le FM-1.&lt;br&gt;Clique sur le bouton &lt;b&gt;FM-1 OFF&lt;/b&gt;&lt;/span&gt;
+    &lt;button class=&quot;go&quot; id=&quot;start&quot;&gt;Fm-1 OFF&lt;/button&gt;
+    &lt;span class=&quot;hint&quot; id=&quot;hint&quot;&gt;Allume le Fm-1.&lt;br&gt;Clique sur le bouton &lt;b&gt;Fm-1 OFF&lt;/b&gt;&lt;/span&gt;
     &lt;span class=&quot;status&quot; id=&quot;status&quot; hidden&gt;&lt;/span&gt;
   &lt;/div&gt;
 
-  &lt;div class=&quot;stage&quot;&gt;&lt;div class=&quot;device&quot; id=&quot;device&quot; aria-label=&quot;Façade du FM-1&quot;&gt;&lt;/div&gt;&lt;/div&gt;
+  &lt;div class=&quot;stage&quot;&gt;&lt;div class=&quot;device&quot; id=&quot;device&quot; aria-label=&quot;Façade du Fm-1&quot;&gt;&lt;/div&gt;&lt;/div&gt;
 
   &lt;div class=&quot;legend&quot;&gt;
     &lt;span&gt;&lt;b&gt;PRESETS&lt;/b&gt; choisit la voix : &lt;i class=&quot;vc&quot; style=&quot;color:#ff7dcd&quot;&gt;ARP&lt;/i&gt;, &lt;i class=&quot;vc&quot; style=&quot;color:#70aaff&quot;&gt;WAV&lt;/i&gt;, &lt;i class=&quot;vc&quot; style=&quot;color:#ffb870&quot;&gt;SEQ&lt;/i&gt;, &lt;i class=&quot;vc&quot; style=&quot;color:#d278ff&quot;&gt;KIT&lt;/i&gt;, &lt;i class=&quot;vc&quot; style=&quot;color:#6fe3e0&quot;&gt;X02&lt;/i&gt;, &lt;i class=&quot;vc&quot; style=&quot;color:#cdffb9&quot;&gt;A09&lt;/i&gt;.&lt;/span&gt;
@@ -1206,7 +1206,7 @@ h1 .a { color: var(--acc); } h1 .w { color: var(--bass); } h1 .n { color: var(--
     if (ctx.resume) ctx.resume();
   }
 
-  /* ---------- UI: the FM-1 front panel, positions taken from its photo (units: a 1000 x 613 picture) ---------- */
+  /* ---------- UI: the Fm-1 front panel, positions taken from its photo (units: a 1000 x 613 picture) ---------- */
   var $ = function (id) { return document.getElementById(id); };
   var dev = $(&quot;device&quot;);
   function mk(tag, cls, html) { var e = document.createElement(tag); e.className = cls; if (html) e.innerHTML = html; return e; }
@@ -1437,7 +1437,7 @@ h1 .a { color: var(--acc); } h1 .w { color: var(--bass); } h1 .n { color: var(--
   function wake() {
     if (!window.__woke) { window.__woke = 1; shufflePerm(); }
     try { if (!ctx) startAudio(); else if (ctx.state === &quot;suspended&quot;) ctx.resume(); } catch (e) {}
-    $(&quot;start&quot;).classList.add(&quot;on&quot;); $(&quot;hint&quot;).classList.add(&quot;off&quot;); $(&quot;start&quot;).textContent = &quot;FM-1 ON&quot;;
+    $(&quot;start&quot;).classList.add(&quot;on&quot;); $(&quot;hint&quot;).classList.add(&quot;off&quot;); $(&quot;start&quot;).textContent = &quot;Fm-1 ON&quot;;
   }
   $(&quot;start&quot;).addEventListener(&quot;click&quot;, wake);
   $(&quot;start&quot;).addEventListener(&quot;touchend&quot;, function (e) { e.preventDefault(); wake(); });
@@ -1446,14 +1446,14 @@ h1 .a { color: var(--acc); } h1 .w { color: var(--bass); } h1 .n { color: var(--
 /* language: FR by default; the page tells us with postMessage({lang}) or ?lang=en */
 (function () {
   var EN = {
-    hint: &quot;Turn the FM-1 on.&lt;br&gt;Click the &lt;b&gt;FM-1 OFF&lt;/b&gt; button&quot;,
+    hint: &quot;Turn the Fm-1 on.&lt;br&gt;Click the &lt;b&gt;Fm-1 OFF&lt;/b&gt; button&quot;,
     legend: [
       &quot;&lt;b&gt;PRESETS&lt;/b&gt; picks the voice: &lt;i class=&#x27;vc&#x27; style=&#x27;color:#ff7dcd&#x27;&gt;ARP&lt;/i&gt;, &lt;i class=&#x27;vc&#x27; style=&#x27;color:#70aaff&#x27;&gt;WAV&lt;/i&gt;, &lt;i class=&#x27;vc&#x27; style=&#x27;color:#ffb870&#x27;&gt;SEQ&lt;/i&gt;, &lt;i class=&#x27;vc&#x27; style=&#x27;color:#d278ff&#x27;&gt;KIT&lt;/i&gt;, &lt;i class=&#x27;vc&#x27; style=&#x27;color:#6fe3e0&#x27;&gt;X02&lt;/i&gt;, &lt;i class=&#x27;vc&#x27; style=&#x27;color:#cdffb9&#x27;&gt;A09&lt;/i&gt;.&quot;,
       &quot;&lt;b&gt;ALGORITHM&lt;/b&gt; sets the voice volume, &lt;b&gt;MASTER&lt;/b&gt; the overall volume.&quot;,
       &quot;&lt;b&gt;SELECT&lt;/b&gt; sets the BPM. &lt;b&gt;FX&lt;/b&gt; switches from page A to page B.&quot;,
       &quot;&lt;b&gt;OCT-&lt;/b&gt; and &lt;b&gt;OCT+&lt;/b&gt; change the octave. &lt;b&gt;REC&lt;/b&gt; and &lt;b&gt;PLAY&lt;/b&gt; only for SEQ.&quot;,
       &quot;&lt;b&gt;HOME&lt;/b&gt; deletes your Track.&quot;
-    ], aria: &quot;FM-1 front panel&quot;, unused: &quot;Not used in this firmware&quot;
+    ], aria: &quot;Fm-1 front panel&quot;, unused: &quot;Not used in this firmware&quot;
   };
   var FR = null;
   function setLang(l) {
@@ -1473,7 +1473,7 @@ h1 .a { color: var(--acc); } h1 .w { color: var(--bass); } h1 .n { color: var(--
 
 &lt;/body&gt;
 &lt;/html&gt;
-" title="Émulateur du FM-1" allow="autoplay"></iframe></div>
+" title="Émulateur du Fm-1" allow="autoplay"></iframe></div>
   </section>
 
 
@@ -1515,7 +1515,7 @@ function brand(t) {
 /* The six voices: the text is the author's, voice by voice. */
 var VOICES = [
   { id: "ARP", c: "var(--arp)", hex: "#ff7dcd", name: "ARP", tag: "Arpégiateur", p: [
-    "Allume le FM-1, tu es sur la voix ARP. Pose tes doigts sur les touches du FM-1, l’Arpégiateur joue automatiquement. Tourne les knobs du FM-1. Tu verras les curseurs des effets se déplacer. En même temps, le son de ton FM-1 va changer. Module le son, et une fois que la partie A te convient, appuie sur le bouton FX, cela ouvre la partie B. Même chose que pour A, module le son, tu constateras que sur cette partie, le son va devenir de plus en plus intéressant pour tes oreilles. Si tu planes très haut, c’est normal, c’est la magie de l’Arpégiateur."],
+    "Allume le Fm-1, tu es sur la voix ARP. Pose tes doigts sur les touches du Fm-1, l’Arpégiateur joue automatiquement. Tourne les knobs du Fm-1. Tu verras les curseurs des effets se déplacer. En même temps, le son de ton Fm-1 va changer. Module le son, et une fois que la partie A te convient, appuie sur le bouton FX, cela ouvre la partie B. Même chose que pour A, module le son, tu constateras que sur cette partie, le son va devenir de plus en plus intéressant pour tes oreilles. Si tu planes très haut, c’est normal, c’est la magie de l’Arpégiateur."],
     tip: "Note : ARP sonne bien même sans théorie musicale. Tu peux appuyer sur plusieurs touches au hasard, laisse toi surprendre. Mais tu peux bien-sûr chercher une harmonie particulière. Les touches appuyées pour former l’Arp restent éclairées.",
     A: ["CUTOFF", "ENV MOD", "DECAY", "RANGE"], B: ["DELAY", "STRETCH", "FM", "CRUSH"] },
   { id: "WAV", c: "var(--wav)", hex: "#70aaff", name: "WAV", tag: "Drone", p: [
@@ -1523,7 +1523,7 @@ var VOICES = [
     tip: "Regarde, les touches qui composent ton Arp sont toujours éclairées. Appuie sur la première touche, tu seras en harmonie avec l’Arp. Laisse durer, et appuie sur une autre des touches éclairées.",
     A: ["CUTOFF", "DRIVE", "DELAY", "WARP"], B: ["RING", "FM", "CRUSH", "FOLD"] },
   { id: "SEQ", c: "var(--seq)", hex: "#ffb870", name: "SEQ", tag: "Séquenceur", p: [
-    "Passe sur la voix SEQ. Appuie sur les touches du FM-1, et cherche une séquence sympathique. Tu l’as ? Ok, appuie sur REC et remplis les cases du séquenceur. Aucune obligation de terminer toutes les cases. Quand tu t’arrêtes, appuie sur PLAY et la séquence se lance. Tourne les knobs. Comme la voix ARP, tu peux moduler le son comme tu le souhaites.",
+    "Passe sur la voix SEQ. Appuie sur les touches du Fm-1, et cherche une séquence sympathique. Tu l’as ? Ok, appuie sur REC et remplis les cases du séquenceur. Aucune obligation de terminer toutes les cases. Quand tu t’arrêtes, appuie sur PLAY et la séquence se lance. Tourne les knobs. Comme la voix ARP, tu peux moduler le son comme tu le souhaites.",
     "Tu peux repartir sur la voix WAV, et apporter de la tension comme je t’ai expliqué précédemment. Tu peux également aller directement sur KIT. Cela tombe bien, c’est la prochaine voix."],
     tip: "N’hésite pas à jouer avec le BPM (SELECT), c’est toujours très efficace pour faire évoluer une séquence.",
     A: ["CUTOFF", "ENV MOD", "DECAY", "DELAY"], B: ["STRETCH", "FM", "FOLD", "CRUSH"] },
@@ -1538,7 +1538,7 @@ var VOICES = [
     tip: "Quelque chose me dit que X02 devrait s’accorder plutôt bien avec la voix WAV B.",
     A: ["GHOST", "ALIEN", "DELAY", "CRUSH"], B: null },
   { id: "A09", c: "var(--fm1)", hex: "#cdffb9", name: "A09", tag: "Ghost Radio", p: [
-    "Et je termine avec A09. Pour cette voix, ne cherche pas à jouer les touches du FM-1, c’est désactivé. Tourne juste les knobs. Qu’est-ce ? Et bien c’est une vieille radio. Balaie la fréquence avec TUNE, si quelque chose t’accroche, affine avec FINE, et tu découvriras des sons cachés. Ghost ? Oui, la radio peut devenir une radio fantôme. Un petit Crush transformera ce que tu auras trouvé."],
+    "Et je termine avec A09. Pour cette voix, ne cherche pas à jouer les touches du Fm-1, c’est désactivé. Tourne juste les knobs. Qu’est-ce ? Et bien c’est une vieille radio. Balaie la fréquence avec TUNE, si quelque chose t’accroche, affine avec FINE, et tu découvriras des sons cachés. Ghost ? Oui, la radio peut devenir une radio fantôme. Un petit Crush transformera ce que tu auras trouvé."],
     tip: "Amuse toi juste si tu veux, mais tu peux aussi te servir de A09 comme générateur de texture. Cela va particulièrement bien avec ARP, tu verras.",
     A: ["TUNE", "FINE", "GHOST", "CRUSH"], B: null }
 ];
@@ -1641,25 +1641,25 @@ var VOICES = [
 
 /* English version: FR is the page as written; EN replaces it on click and is remembered. */
 var EN = {
-  top: "FirmWare M-VAVE FM-1",
-  i1: "Arp Wav 09 is a minimalist, instinctive FirmWare, built around playing. If you love the analog sound of synthesizers, and listen to Kavinsky and John Carpenter, you’re in the right place!",
+  top: 'FirmWare <span style="color:var(--fm1)">M-Vave-Fm-1</span>',
+  i1: "Arp Wav 09 is a minimalist, instinctive FirmWare, built around playing. If you love the analog sound of synthesizers, and listen to Kavinsky and John Carpenter, you’re in the right place !",
   i3: "It’s an instinctive FirmWare that goes straight to the essentials. I deliberately disabled several keys. Everything is played with the knobs. No menu, no sub-menu, no superfluous function. You have six voices that you can play separately, or link together.<br>No sound presets. You shape the signal, and you sculpt the sound in real time.",
   i4: 'Six voices.<br><span style="color:var(--arp)">ARP</span> / <span style="color:var(--wav)">WAV</span> / <span style="color:var(--seq)">SEQ</span> / <span style="color:var(--kit)">KIT</span> / <span style="color:var(--sfx)">X02</span> / <span style="color:var(--fm1)">A09</span>.',
-  hub: "Install on FM-1",
+  hub: "Install on Fm-1",
   k1: "The voices", h1: "Explore the 6 voices.",
-  k2: "In the browser", h2: "The FM-1, without the FM-1.",
+  k2: "In the browser", h2: "The Fm-1, without the Fm-1.",
   c1: "Oh, I almost forgot: there’s no saving here. You live the experience, and it disappears when you switch off. Little by little, you’ll make my FirmWare your own, and you’ll stop thinking about what you’re doing. It all becomes improvisation and free experimentation. That’s how I designed Arp Wav 09.",
-  c3: "I regularly post short videos of Arp Wav 09 on my YouTube channel.<br>You can contact me by mail, to tell me your feedback about Arp Wav 09, if you want!",
-  c5: "I wish you a great experience with Arp Wav 09, carried by the analog sound of the synth, and the strange noises you will probably come across!",
+  c3: "I regularly post short videos of Arp Wav 09 on my YouTube channel.<br>You can contact me by mail, to tell me your feedback about Arp Wav 09, if you want !",
+  c5: "I wish you a great experience with Arp Wav 09, carried by the analog sound of the synth, and the strange noises you will probably come across !",
   f1: "FirmWare base: Dinghy"
 };
 var VOICES_EN = {
-  ARP: { tag: "Arpeggiator", p: ["Turn the FM-1 on, you’re on the ARP voice. Put your fingers on the FM-1’s keys, the Arpeggiator plays by itself. Turn the FM-1’s knobs. You’ll see the effect sliders move. At the same time, the sound of your FM-1 will change. Shape the sound, and once part A suits you, press the FX button, which opens part B. Same thing as for A, shape the sound, and you’ll notice that on this part the sound gets more and more interesting for your ears. If you’re floating very high, that’s normal, it’s the magic of the Arpeggiator."],
+  ARP: { tag: "Arpeggiator", p: ["Turn the Fm-1 on, you’re on the ARP voice. Put your fingers on the Fm-1’s keys, the Arpeggiator plays by itself. Turn the Fm-1’s knobs. You’ll see the effect sliders move. At the same time, the sound of your Fm-1 will change. Shape the sound, and once part A suits you, press the FX button, which opens part B. Same thing as for A, shape the sound, and you’ll notice that on this part the sound gets more and more interesting for your ears. If you’re floating very high, that’s normal, it’s the magic of the Arpeggiator."],
     tip: "Note: ARP sounds good even without music theory. You can press several keys at random, let yourself be surprised. But of course you can also look for a particular harmony. The keys you pressed to form the Arp stay lit." },
   WAV: { tag: "Drone", p: ["Switch to the WAV voice by turning the PRESETS knob, play the notes freely, there’s no recording here, experiment and above all don’t rush: the sound goes on forever until you press another key. The tension builds, and seems to balance the Arp, which keeps hypnotizing you. If you go to part B, the sound takes you to a completely different dimension, you’ll feel like you’re piloting a spaceship. But be careful, there may be heavy turbulence. Don’t hesitate to push the sliders, the crossing will be more chaotic. No problem, at any moment you can come back to calmer waters. But let’s stay with what ARP and WAV produce."],
     tip: "Look, the keys that make up your Arp are always lit. Press the first key and you’ll be in harmony with the Arp. Let it ring, then press another of the lit keys." },
   SEQ: { tag: "Sequencer", p: [
-    "Switch to the SEQ voice. Press the FM-1’s keys and look for a nice sequence. Got it? OK, press REC and fill the sequencer’s steps. No need to fill them all. When you stop, press PLAY and the sequence starts. Turn the knobs. Like the ARP voice, you can shape the sound however you like.",
+    "Switch to the SEQ voice. Press the Fm-1’s keys and look for a nice sequence. Got it? OK, press REC and fill the sequencer’s steps. No need to fill them all. When you stop, press PLAY and the sequence starts. Turn the knobs. Like the ARP voice, you can shape the sound however you like.",
     "You can go back to the WAV voice and bring in tension, as I explained earlier. You can also go straight to KIT. Conveniently, it’s the next voice."],
     tip: "Don’t hesitate to play with the BPM (SELECT), it’s always very effective for making a sequence evolve." },
   KIT: { tag: "Drum", p: [
@@ -1671,7 +1671,7 @@ var VOICES_EN = {
     "Generate sounds from elsewhere. Arp Wav 09 is the ideal FirmWare for listening to ghosts and aliens, don’t you think?"],
     tip: "Something tells me X02 should go rather well with the WAV B voice." },
   A09: { tag: "Ghost Radio", p: [
-    "And I’ll finish with A09. For this voice, don’t try to play the FM-1’s keys, they’re disabled. Just turn the knobs. What is it? Well, it’s an old radio. Sweep the frequency with TUNE, if something catches your ear, fine-tune with FINE, and you’ll discover hidden sounds. Ghost? Yes, the radio can become a ghost radio. A little Crush will transform what you’ve found."],
+    "And I’ll finish with A09. For this voice, don’t try to play the Fm-1’s keys, they’re disabled. Just turn the knobs. What is it? Well, it’s an old radio. Sweep the frequency with TUNE, if something catches your ear, fine-tune with FINE, and you’ll discover hidden sounds. Ghost? Yes, the radio can become a ghost radio. A little Crush will transform what you’ve found."],
     tip: "Just have fun if you like, but you can also use A09 as a texture generator. It goes particularly well with ARP, you’ll see." }
 };
 var PAGE_EN = { lang: "en", aria: "My YouTube channel", fm1: "Five voices" };
@@ -1688,7 +1688,7 @@ var PAGE_EN = { lang: "en", aria: "My YouTube channel", fm1: "Five voices" };
     document.documentElement.lang = l;
     var ids = ["Les six voix", "The six voices"]; document.getElementById("stations").setAttribute("aria-label", l === "en" ? ids[1] : ids[0]);
     yt.setAttribute("aria-label", l === "en" ? "My YouTube channel" : "Ma chaîne YouTube"); yt.title = yt.getAttribute("aria-label");
-    emu.title = l === "en" ? "FM-1 emulator" : "Émulateur du FM-1";
+    emu.title = l === "en" ? "Fm-1 emulator" : "Émulateur du Fm-1";
     [].forEach.call(document.querySelectorAll(".lang button"), function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-l") === l)); });
     if (window.__showVoice) window.__showVoice();
     sendLang(); [100, 400, 1200].forEach(function (d) { setTimeout(function () { if (window.__fit) window.__fit(); }, d); });
