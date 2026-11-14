@@ -47,19 +47,27 @@ h1.glitch .w { animation: jit 7s steps(1) infinite; }
 .intro .five { font: 400 clamp(20px, 2.6vw, 24px)/1.5 var(--mono); letter-spacing: .04em; }
 .intro p { line-height: 1.75; }
 .intro p:first-child { font-size: clamp(19px, 2.4vw, 22px); line-height: 1.6; }
-.cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.cta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
+.hubtag { font: 400 16px var(--mono); letter-spacing: .06em; color: var(--dim); }
 .btn { display: inline-block; font: 400 16px var(--mono); letter-spacing: .06em; text-decoration: none; padding: 13px 20px; border-radius: 3px; border: 1px solid var(--line); background: transparent; cursor: pointer; }
 .btn:hover { border-color: var(--fg); }
-.btn.main { color: var(--bg); background: var(--fm1); border-color: var(--fm1); }
-.btn.main:hover { filter: brightness(1.08); }
+.btn.main { color: #fff; font-weight: 700; background: #7a4fe0; border-color: #7a4fe0; transition: background .15s, border-color .15s; }
+.btn.main:hover, .btn.main:active, .btn.main:focus-visible { background: #ff5cbd; border-color: #ff5cbd; filter: none; outline: none; }
 .btn[hidden] { display: none; }
 .yt-ico { display: inline-block; line-height: 0; transition: transform .1s; }
 .yt-ico svg { width: 64px; height: 45px; display: block; }
 .yt-ico .bx { fill: #7a4fe0; transition: fill .15s; }
 .yt-ico .pl { fill: #fff; }
+.yt-ico .ln { fill: none; stroke: var(--bg); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 .yt-ico:hover .bx, .yt-ico:active .bx, .yt-ico:focus-visible .bx { fill: #ff5cbd; }
+.mail-ico .bx { fill: var(--x02); }
+.mail-ico:hover .bx, .mail-ico:active .bx, .mail-ico:focus-visible .bx { fill: var(--a09); }
 .yt-ico:active { transform: translateY(1px); }
 .yt-ico:focus-visible { outline: none; }
+.ico-row { display: flex; justify-content: flex-start; align-items: center; gap: 18px; }
+.mailmsg { font: 400 13px var(--mono); letter-spacing: .06em; color: var(--dim); opacity: 0; transition: opacity .2s; }
+.mailmsg b { font-weight: 400; color: var(--a09); }
+.mailmsg.on { opacity: 1; }
 
 .crt { position: relative; justify-self: center; width: 100%; max-width: 330px; padding: 14px; border-radius: 22px; background: #05060f; border: 1px solid #2c3070; box-shadow: 0 0 0 5px #0d0f28, 0 0 60px rgba(112, 170, 255, .12), inset 0 0 20px #000; }
 .crt::after { content: "ECRAN DU WAVE"; position: absolute; left: 0; right: 0; bottom: -34px; text-align: center; font: 400 12px var(--mono); letter-spacing: .24em; color: var(--muted); }
@@ -157,9 +165,10 @@ footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8p
         <p data-i="i1">Arp Wav 09 est un Firmware minimaliste et instinctif, basé sur l’expérience de jeu. Si tu aimes le son analogique des synthétiseurs, et que tu écoutes Kavinsky et John Carpenter, tu es au bon endroit !</p>
         <p data-i="i3">C’est un FirmWare instinctif, qui va à l’essentiel. J’ai volontairement désactivé plusieurs touches. Tout se joue avec les knobs. Aucun menu, ni sous menu, ni fonction superflue. Tu as six voix que tu peux jouer séparément, ou les relier entre elles.<br>Aucun preset de son. Tu modules le signal, et tu sculptes le son en temps réel.</p>
         <p class="five" data-i="i4">Six voix.<br><span style="color:var(--arp)">ARP</span> / <span style="color:var(--wav)">WAV</span> / <span style="color:var(--seq)">SEQ</span> / <span style="color:var(--kit)">KIT</span> / <span style="color:var(--sfx)">X02</span> / <span style="color:var(--fm1)">A09</span>.</p>
-      </div>
-      <div class="cta">
-        <a class="btn main" id="l-hub" href="#" hidden data-i="hub">Installer le firmware</a>
+        <div class="cta">
+          <a class="btn main" id="l-hub" href="#" hidden data-i="hub">Installer sur FM-1</a>
+          <span class="hubtag"><span style="color:var(--arp);font-weight:700">The Firmware Hub</span> / Make Firmware not War</span>
+        </div>
       </div>
     </div>
   </header>
@@ -1469,8 +1478,8 @@ h1 .a { color: var(--acc); } h1 .w { color: var(--bass); } h1 .n { color: var(--
 
 
   <section class="closing">
-    <p><span data-i="c3">Je poste régulièrement des petites vidéos de Arp Wav 09, sur ma chaîne YouTube.<br>N’hésite pas à venir regarder et commenter !</span></p>
-    <p><a class="yt-ico" href="https://www.youtube.com/@Wav.09.02" target="_blank" rel="noopener" id="yt" aria-label="Ma chaîne YouTube" title="Ma chaîne YouTube"><svg viewBox="0 0 28 20" aria-hidden="true"><rect class="bx" x="0" y="0" width="28" height="20" rx="6"/><path class="pl" d="M11.2 5.6v8.8l7.6-4.4z"/></svg></a></p>
+    <p><span data-i="c3">Je poste régulièrement des petites vidéos de Arp Wav 09, sur ma chaîne YouTube.<br>Tu peux me contacter par mail, pour me faire tes retours sur Arp Wav 09, si tu veux !</span></p>
+    <p class="ico-row"><a class="yt-ico" href="https://www.youtube.com/@Wav.09.02" target="_blank" rel="noopener" id="yt" aria-label="Ma chaîne YouTube" title="Ma chaîne YouTube"><svg viewBox="0 0 28 20" aria-hidden="true"><rect class="bx" x="0" y="0" width="28" height="20" rx="6"/><path class="pl" d="M11.2 5.6v8.8l7.6-4.4z"/></svg></a><a class="yt-ico mail-ico" href="mailto:thierry.blstn@gmail.com" id="mail" aria-label="Mail" title="Mail"><svg viewBox="0 0 28 20" aria-hidden="true"><rect class="bx" x="0" y="0" width="28" height="20" rx="6"/><path class="ln" d="M6 6.5h16v7.5H6z"/><path class="ln" d="M6.4 7l7.6 5.2L21.6 7"/></svg></a><span class="mailmsg" id="mailmsg" aria-live="polite"></span></p>
   </section>
 
   <footer><span data-i="f1">Base du FirmWare : Dinghy</span></footer>
@@ -1478,11 +1487,25 @@ h1 .a { color: var(--acc); } h1 .w { color: var(--bass); } h1 .n { color: var(--
 
 <script>
 /* Links: fill these in when the addresses are known; a button with no address stays hidden. */
-var LINKS = { hub: "", youtube: "https://www.youtube.com/@Wav.09.02" };
+var LINKS = { hub: "https://thefirmwarehub.com/firmware/arpwav09/", youtube: "https://www.youtube.com/@Wav.09.02" };
 (function () {
   [["l-hub", LINKS.hub]].forEach(function (p) {
     var el = document.getElementById(p[0]);
     if (p[1]) { el.href = p[1]; el.target = "_blank"; el.rel = "noopener"; el.hidden = false; }
+  });
+})();
+
+(function () {
+  var a = document.getElementById("mail"), m = document.getElementById("mailmsg"), t;
+  if (!a || !m) return;
+  a.addEventListener("click", function () {
+    var addr = a.getAttribute("href").replace("mailto:", "");
+    var en = document.querySelector('.lang button[data-l="en"]').getAttribute("aria-pressed") === "true";
+    function say(txt, ad) { m.textContent = txt ? txt + " " : ""; var b = document.createElement("b"); b.textContent = ad; m.appendChild(b); m.classList.add("on"); clearTimeout(t); t = setTimeout(function () { m.classList.remove("on"); }, 4000); }
+    var ok = en ? "Address copied:" : "Adresse copiée :";
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(addr).then(function () { say(ok, addr); }, function () { say("", addr); });
+    } else { say("", addr); }
   });
 })();
 
@@ -1622,11 +1645,11 @@ var EN = {
   i1: "Arp Wav 09 is a minimalist, instinctive FirmWare, built around playing. If you love the analog sound of synthesizers, and listen to Kavinsky and John Carpenter, you’re in the right place!",
   i3: "It’s an instinctive FirmWare that goes straight to the essentials. I deliberately disabled several keys. Everything is played with the knobs. No menu, no sub-menu, no superfluous function. You have six voices that you can play separately, or link together.<br>No sound presets. You shape the signal, and you sculpt the sound in real time.",
   i4: 'Six voices.<br><span style="color:var(--arp)">ARP</span> / <span style="color:var(--wav)">WAV</span> / <span style="color:var(--seq)">SEQ</span> / <span style="color:var(--kit)">KIT</span> / <span style="color:var(--sfx)">X02</span> / <span style="color:var(--fm1)">A09</span>.',
-  hub: "Install the FirmWare",
+  hub: "Install on FM-1",
   k1: "The voices", h1: "Explore the 6 voices.",
   k2: "In the browser", h2: "The FM-1, without the FM-1.",
   c1: "Oh, I almost forgot: there’s no saving here. You live the experience, and it disappears when you switch off. Little by little, you’ll make my FirmWare your own, and you’ll stop thinking about what you’re doing. It all becomes improvisation and free experimentation. That’s how I designed Arp Wav 09.",
-  c3: "I regularly post short videos of Arp Wav 09 on my YouTube channel.<br>Feel free to come watch and comment!",
+  c3: "I regularly post short videos of Arp Wav 09 on my YouTube channel.<br>You can contact me by mail, to tell me your feedback about Arp Wav 09, if you want!",
   c5: "I wish you a great experience with Arp Wav 09, carried by the analog sound of the synth, and the strange noises you will probably come across!",
   f1: "FirmWare base: Dinghy"
 };
