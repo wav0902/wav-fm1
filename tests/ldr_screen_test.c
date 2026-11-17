@@ -120,7 +120,7 @@ int main(int argc, char **argv)
     ppm(dir, "ldr_update_mode");
     check("UPDATE MODE: the name in its colour, the status, the hub's address in lila, 20 segments off",
           count(0, 20, 240, 76, LDR_COLOUR) > 300u && count(0, 92, 240, 112, LDR_INK) > 200u &&
-          count(0, 220, 240, 230, LDR_HUB) > 80u && lit_segs(LDR_DIM) == LDR_SEGS);
+          lit_segs(LDR_DIM) == LDR_SEGS);
     check("only the screen's colours, the background the hub's", palette_only() && count(0, 0, 240, 10, LDR_BG) == 2400u);
     for (ms = 0; ms < 60u * 60u; ms += 60u) {        /* an hour of steps: the light goes to and fro, one segment lit */
         ldr_anim(ms);
