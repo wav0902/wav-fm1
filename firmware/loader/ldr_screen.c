@@ -6,15 +6,15 @@
  *   the firmware's name, big, in its colour, a thin line under it
  *   what happens (UPDATE MODE, WRITING, UPDATE FAILED) and what to do, white and grey
  *   20 segments: a light running to and fro while it waits (ldr_anim), the share written while it writes, the percent
- *   thefirmwarehub.com at the foot, in the hub's lila
+ *   (nothing at the foot)
  * Drawn with the loader's own letters (the app area may be half written: never read), before USB starts (USB is
  * polled: the panel's ~0.3 s init would leave the host's enumeration unanswered). FM-1 only (the SMK-37's stays dark).
  * LDR_NAME / LDR_COLOUR: the firmware's name (at most 9 letters at size 4, more get smaller) and colour (RGB565). */
 #ifndef LDR_NAME
-#define LDR_NAME "DINGHY"                  /* (tools/build.py: LOADER_NAME) */
+#define LDR_NAME "ARP WAV 09"
 #endif
 #ifndef LDR_COLOUR
-#define LDR_COLOUR 0xB47Fu               /* Dinghy's lilac, #B48CFF (tools/build.py: LOADER_COLOUR) */
+#define LDR_COLOUR 0xFBD7u               /* the neon pink of the titles, #FF7AB8 */
 #endif
 #define LDR_BG 0x1082u                   /* the hub's background, #151213 */
 #define LDR_INK 0xEF5Cu                  /* its text, #EFE8E1 */
@@ -133,7 +133,7 @@ static void ldr_screen(void)
     ldr_say("UPDATE MODE", "WAITING FOR THE INSTALL");
     for (i = 0; i < LDR_SEGS; i++)
         ldr_seg(i, LDR_DIM);
-    ldr_text(222, 1, LDR_HUB, "thefirmwarehub.com");
+    /* (no address at the foot) */
     lcd_sync();
 }
 static uint32_t ldr_at(uint32_t pos) { return pos < LDR_SEGS ? pos : 2u * LDR_SEGS - 2u - pos; }   /* to and fro */
