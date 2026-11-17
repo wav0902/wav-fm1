@@ -108,12 +108,12 @@ static uint32_t dpos, dlen = 18042u, dq = 18042u << 8;   /* the wanted delay tim
 static int32_t dlpl, dlpr, wph;
 
 /* ---- effects per voice, integers only. CRUSH: from zero up, fewer bits and a lower sample rate together. */
-typedef struct { int32_t hold; uint32_t cnt; } fx_t;
+typedef struct { int32_t hold; uint32_t cnt, bass; } fx_t;
 static int32_t fx_run(fx_t *f, int32_t x, int32_t crush)
 {
     crush = ez((uint32_t)crush);
     if (crush) {
-        uint32_t sh = 6u + (((uint32_t)crush * 6u) >> 7), n = 1u + (((uint32_t)crush * (uint32_t)crush) >> 8);
+        uint32_t sh = 6u + (((uint32_t)crush * 6u) >> 7), n = 1u + (((uint32_t)crush * (uint32_t)crush) >> (f->bass ? 10u : 8u));   /* the bass: a gentler sample-rate drop, it stays deep */
         x = (x >> sh) * (int32_t)(1u << sh);    /* fewer bits (8 bits at once, 3 at the end) */
         if (++f->cnt >= n) { f->cnt = 0; f->hold = x; }          /* and a lower sample rate: hold every n-th sample */
         x = f->hold;
@@ -258,7 +258,7 @@ static struct {
     int32_t amp, f, q;
     svf_t sv, sv2;
     fx_t fx;
-    int32_t dlp;
+    int32_t dlp, clp;
 } B;
 
 static int32_t fcoef(uint32_t hz)               /* 2 sin(pi f / 44100) in Q15 (a short series: the formants are under 2.4 kHz) */
@@ -1145,13 +1145,13 @@ static void app_audio(int32_t *out, uint32_t n)
             {
                 int32_t dk = (int32_t)(P[6] > 127u ? 127u : P[6]);
                 uint32_t t;
-                ds0 = (ez((uint32_t)dk) * (256 + (dk * dk * 230) / 16129)) >> 8;       /* the ARP delay: sent more and more as the knob goes up */
+                ds0 = (ez((uint32_t)dk) * (256 + (dk * dk * 77) / 16129)) >> 8;       /* the ARP delay: sent more and more as the knob goes up */
                 ds1 = ez(P[18]); ds3 = ez(P[54]); ds4 = ez(P[29]);
                 mx = ds0 > ds1 ? ds0 : ds1; if (ds3 > mx) mx = ds3; if (ds4 > mx) mx = ds4;
-                t = (uint32_t)dk * 7000u / 127u; t = t * (uint32_t)(870 + dk * 154 / 127) >> 10;
+                t = (uint32_t)dk * 4500u / 127u; t = t * (uint32_t)(870 + dk * 154 / 127) >> 10;
                 dfb = 11000u + 190u * (uint32_t)mx + t;                    /* the more you send, the longer it rings (The Edge at the top of the knob) */
-                if (dfb > 32000u) dfb = 32000u;
-                dwet = 256 + dk * 179 / 127;                                  /* and the echoes get louder too */
+                if (dfb > 28000u) dfb = 28000u;
+                dwet = 256 + dk * 64 / 127;                                  /* and the echoes get louder too */
                 if (h_seen != h_evt) { h_seen = h_evt; h_tail = 5u * 44100u; }
                 if (h_tail) { h_tail = h_tail > 32u ? h_tail - 32u : 0u; if (dfb < 25000u) dfb = 25000u; if (dwet < 358) dwet = 358; }   /* after HOME the echoes die away slowly */
             }
@@ -1221,7 +1221,9 @@ static void app_audio(int32_t *out, uint32_t n)
                     if (at >= 131072u) th = 32767; else { ti = at >> 9; th = TANHQ[ti] + (((TANHQ[ti + 1u] - TANHQ[ti]) * (int32_t)(at & 511u)) >> 9); }
                     yb = (th * 29491) >> 15; if (t < 0) yb = -yb;
                     B.dlp += ((yb - B.dlp) * (256 - (int32_t)(dg * 154u / 127u))) >> 8; yb = B.dlp;
+                    B.fx.bass = 1u;
                     yb = fx_run(&B.fx, yb, (int32_t)P[23]);
+                    B.clp += ((yb - B.clp) * (256 - (int32_t)(ez(P[23]) * 190u >> 7))) >> 8; yb = B.clp;   /* the crush of the bass stays deep: its harsh top is rounded off */
                     yb = (int32_t)(((int64_t)yb * B.amp * 30 * CMPDG[dg]) >> 27);
                 }
                 yb = (yb * (int32_t)(VOL[1] + 1u)) >> 7;
@@ -1230,9 +1232,9 @@ static void app_audio(int32_t *out, uint32_t n)
 
         /* FM1 */
         ys = 0;
-        if (!s_off) { ys = sig_voice(); ys = fx_run(&FXS, ys, (int32_t)P[43]); ys = (ys * (int32_t)(VOL[4] + 1u) * 20) >> 9; }
+        if (!s_off) { ys = sig_voice(); ys = fx_run(&FXS, ys, (int32_t)P[43]); ys = (ys * (int32_t)(VOL[4] + 1u) * 12) >> 9; }
 
-        yd = (drums() * 3) >> 1;
+        yd = drums() * 2;
         yf = (x_sample() * 87) >> 6;
         {
             int32_t wl, wr, vl, vr, a0, a1, ml, mr, dry = (int32_t)(((int64_t)((ya * 243 + yb * 134 + ys * 154 + yq * 179) >> 7) * (32768 - d_duck)) >> 15) + yd + yf;
@@ -1262,8 +1264,8 @@ static void app_audio(int32_t *out, uint32_t n)
                 sp_bp += sp_bi; q = (int32_t)sp_bp >> 16; q = soft((q < 0 ? -q : q) * 2 - 32768);
                 dry += ((nz * (int32_t)sp_hs) >> 8) + ((nz * sp_ce) >> 14) + ((nz * (int32_t)sp_fa) >> 14) + w + ((q * (int32_t)sp_ba) >> 15);
             }
-            ml = ((dry + (((wl + (wl >> 1)) * dwet) >> 8)) * 19) >> 5;
-            mr = ((dry + (((wr + (wr >> 1)) * dwet) >> 8)) * 19) >> 5;
+            ml = ((dry + (((wl + (wl >> 1)) * dwet) >> 8)) * 11) >> 5;
+            mr = ((dry + (((wr + (wr >> 1)) * dwet) >> 8)) * 11) >> 5;
             if (ml > 24000) ml = 24000 + ((ml - 24000) >> 1); else if (ml < -24000) ml = -24000 - ((-24000 - ml) >> 1);   /* a soft knee above 24000 */
             if (mr > 24000) mr = 24000 + ((mr - 24000) >> 1); else if (mr < -24000) mr = -24000 - ((-24000 - mr) >> 1);
             if (ml > 32767) ml = 32767; else if (ml < -32767) ml = -32767;
@@ -1334,7 +1336,7 @@ static uint32_t keyf(const uint16_t (*tb)[2], uint32_t n, uint32_t t)    /* brig
     return tb[n - 1][1];
 }
 
-static void splash_snd(uint32_t t)              /* the sound, set from the picture's clock */
+static void __attribute__((unused)) splash_snd(uint32_t t)              /* the sound, set from the picture's clock */
 {
     uint32_t i, w = 0, hz = 0, fo = t < 150u ? t * 256u / 150u : t < 1900u ? 256u : t < 2900u ? 256u - (t - 1900u) * 179u / 1000u : t < 3300u ? 77u * (3300u - t) / 400u : 0u, fa = 0;
     sp_hs = (t < 600u ? 26u : 16u) * fo >> 8;
@@ -1364,11 +1366,11 @@ static uint8_t sc_a[240], sc_b[240];
 static uint32_t sc_head, sc_fade, sc_dy;
 static void scope_calc(uint32_t t)
 {
-    uint32_t x, tq = t / 80u;
+    uint32_t x, ts = t * 5u / 8u, tq = ts / 80u;          /* the signal arrives slower than the title lights */
     int32_t prev = 120, e = 86 << 8, ph = 0;
-    sc_head = t < 600u ? t * 92u / 600u : 92u + (t - 600u) * 148u / 330u;
+    sc_head = ts < 600u ? ts * 92u / 600u : 92u + (ts - 600u) * 148u / 330u;
     if (sc_head > 239u) sc_head = 240u;
-    sc_fade = t < 930u ? 256u : t < 1130u ? 256u - 171u * (t - 930u) / 200u : t < 1800u ? 85u : t < 2800u ? 85u * (2800u - t) / 1000u : 0u;
+    sc_fade = t < 2400u ? 20u + 236u * t / 2400u : 256u;                 /* it lights up little by little with the title, and stays lit to the end */
     for (x = 0; x < 240u && x <= sc_head; x++) {
         int32_t y;
         if (x < 92u) {
@@ -1401,8 +1403,8 @@ static void splash_overlay(const img_t *m, int32_t x, int32_t y, uint32_t k, int
 
 static void splash_draw(uint32_t kl, uint32_t kt)
 {
-    uint32_t band, x, kf = sc_fade * 230u >> 8, tc, wc;
-    tc = RGB(9 + (131 * kf >> 8), 11 + (219 * kf >> 8), 32 + (223 * kf >> 8)); wc = RGB(9 + (246 * sc_fade >> 8), 11 + (244 * sc_fade >> 8), 32 + (223 * sc_fade >> 8));
+    uint32_t band, x, kf = sc_fade, tc, wc;
+    tc = RGB(9 + (196 * kf >> 8), 11 + (244 * kf >> 8), 32 + (157 * kf >> 8));   /* from the dark up to the green of the 09 */ wc = RGB(9 + (246 * sc_fade >> 8), 11 + (244 * sc_fade >> 8), 32 + (223 * sc_fade >> 8));
     for (band = 0; band < 3u; band++) {
         int32_t by = 30 + (int32_t)band * SB;
         cv_begin(240, SB, C_BG);
@@ -1429,22 +1431,23 @@ static void splash_draw(uint32_t kl, uint32_t kt)
 
 static void splash(void)                        /* ARP WAV 09: a signal hunted across the screen, found, then the neon lights */
 {
-    uint32_t t0 = fm1_ms, t, tl = 0, lkl = ~0u, lkt = ~0u, lhd = ~0u, lfd = ~0u, ltq = ~0u, kl, kt;
+    uint32_t t0 = fm1_ms, t, tm, tl = 0, lkl = ~0u, lkt = ~0u, lhd = ~0u, lfd = ~0u, ltq = ~0u, kl, kt;
     lcd_fill(0, 0, 240, 240, C_BG);
     do {
         t = fm1_ms - t0;
+        tm = t * 5u / 7u; if (tm > SPLASH_MS) tm = SPLASH_MS;      /* the picture runs 1.4 times slower, then stays a second */
         platform_poll();
-        splash_snd(t);
+        /* the start-up screen is silent */
         if (t - tl >= 40u) {                    /* the picture follows every 40 ms */
             tl = t;
-            scope_calc(t);
-            kl = keyf(LG, sizeof LG / sizeof LG[0], t) & ~3u; kt = keyf(TG, sizeof TG / sizeof TG[0], t) & ~3u;
-            if (kl != lkl || kt != lkt || sc_head != lhd || sc_fade != lfd || (sc_fade && t / 80u != ltq)) {
-                lkl = kl; lkt = kt; lhd = sc_head; lfd = sc_fade; ltq = t / 80u;
+            scope_calc(tm);
+            kl = keyf(LG, sizeof LG / sizeof LG[0], tm) & ~3u; kt = keyf(TG, sizeof TG / sizeof TG[0], tm) & ~3u;
+            if (kl != lkl || kt != lkt || sc_head != lhd || sc_fade != lfd || (sc_fade && tm * 5u / 8u / 80u != ltq)) {
+                lkl = kl; lkt = kt; lhd = sc_head; lfd = sc_fade; ltq = tm * 5u / 8u / 80u;
                 splash_draw(kl, kt);
             }
         }
-    } while (t < SPLASH_MS);
+    } while (t < SPLASH_MS * 7u / 5u + 1000u);
     sp_hs = sp_cr = sp_fa = sp_wa = sp_ba = 0;
     lcd_fill(0, 0, 240, 240, C_BG);
 }
