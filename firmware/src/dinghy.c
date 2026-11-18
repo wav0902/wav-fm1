@@ -24,6 +24,7 @@ static void app_idle(void) {}
 static const int16_t TANHQ[257] = {0,512,1024,1535,2045,2555,3063,3570,4075,4578,5079,5577,6073,6566,7056,7542,8025,8505,8980,9452,9919,10382,10840,11294,11742,12186,12625,13058,13486,13908,14325,14737,15142,15542,15936,16324,16706,17081,17451,17815,18173,18524,18869,19208,19541,19868,20189,20503,20812,21114,21411,21701,21986,22264,22537,22804,23065,23320,23570,23815,24053,24287,24515,24738,24955,25168,25375,25578,25775,25968,26156,26339,26518,26693,26863,27029,27190,27348,27501,27650,27796,27937,28075,28210,28340,28468,28592,28712,28829,28943,29054,29162,29267,29369,29469,29565,29659,29750,29839,29925,30009,30090,30169,30246,30321,30393,30464,30532,30599,30663,30726,30787,30846,30903,30959,31013,31066,31117,31166,31215,31261,31306,31350,31393,31435,31475,31514,31552,31588,31624,31658,31692,31725,31756,31787,31817,31845,31873,31900,31927,31952,31977,32001,32024,32047,32069,32090,32111,32131,32150,32169,32187,32205,32222,32239,32255,32270,32286,32300,32315,32328,32342,32355,32367,32380,32391,32403,32414,32425,32435,32446,32455,32465,32474,32483,32492,32500,32508,32516,32524,32531,32539,32546,32553,32559,32565,32572,32578,32583,32589,32595,32600,32605,32610,32615,32619,32624,32628,32633,32637,32641,32645,32648,32652,32656,32659,32662,32666,32669,32672,32675,32677,32680,32683,32685,32688,32690,32693,32695,32697,32699,32701,32703,32705,32707,32709,32711,32713,32714,32716,32717,32719,32720,32722,32723,32725,32726,32727,32728,32730,32731,32732,32733,32734,32735,32736,32737,32738,32739,32740,32740,32741,32742,32743,32744,32744,32745};
 static const uint16_t DRVG[128] = {159,164,173,184,196,210,225,241,258,276,294,314,334,355,376,398,421,444,468,492,517,542,568,594,621,648,676,704,732,761,790,820,850,880,911,942,974,1006,1038,1071,1103,1137,1170,1204,1238,1273,1308,1343,1378,1414,1450,1486,1523,1560,1597,1634,1672,1710,1748,1787,1825,1864,1904,1943,1983,2023,2063,2104,2145,2186,2227,2268,2310,2352,2394,2437,2479,2522,2565,2608,2652,2696,2740,2784,2828,2873,2918,2963,3008,3053,3099,3145,3191,3237,3283,3330,3377,3424,3471,3519,3566,3614,3662,3710,3758,3807,3856,3905,3954,4003,4053,4102,4152,4202,4252,4303,4353,4404,4455,4506,4557,4608,4660,4712,4764,4816,4868,4920};
 static const uint16_t CMPDG[128] = {594,575,555,535,516,496,476,457,437,418,398,378,359,339,319,300,280,276,272,268,264,259,255,251,247,243,239,235,231,227,222,218,214,213,213,212,211,210,209,208,207,206,206,205,204,203,202,201,200,200,200,200,200,200,200,200,200,200,200,200,200,200,200,200,200,200,200,200,200,199,199,199,199,199,198,198,198,198,197,197,197,197,198,198,199,199,200,200,200,201,201,202,202,203,203,203,204,204,204,205,205,205,205,205,206,206,206,206,206,207,207,207,207,208,209,209,210,211,211,212,213,213,214,214,215,216,216,217};
+static const uint16_t RUSHQ[128] = {256,256,256,256,256,256,257,257,257,257,258,258,259,259,260,260,261,262,262,263,264,265,266,267,268,269,270,271,273,274,275,277,278,280,281,283,285,287,288,290,292,294,296,299,301,303,305,308,310,313,315,318,321,323,326,329,332,335,338,341,345,348,351,355,358,362,365,369,373,376,380,384,388,392,396,401,405,409,414,418,423,427,432,437,442,447,452,457,462,467,472,477,483,488,494,499,505,511,517,523,528,535,541,547,553,559,566,572,579,585,592,599,606,613,620,627,634,641,648,656,663,670,678,686,693,701,709,717};   /* the soft RUSH: the ARP's 16th gets shorter, very slowly at first, up to 2.8 times faster */
 static const uint8_t POW06[128] = {0,6,10,12,14,17,18,20,22,23,25,27,28,29,31,32,33,34,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,57,58,59,60,61,62,63,63,64,65,66,67,67,68,69,70,70,71,72,73,73,74,75,76,76,77,78,78,79,80,80,81,82,82,83,84,85,85,86,86,87,88,88,89,90,90,91,92,92,93,94,94,95,95,96,97,97,98,98,99,100,100,101,101,102,103,103,104,104,105,105,106,107,107,108,108,109,109,110,111,111,112,112,113,113,114,114,115};
 
 /* ---- shared with the audio ISR: one writer each (docs/RULES.md) */
@@ -211,16 +212,17 @@ static void seq_step(void)                      /* the next box of the loop */
 
 /* ---- the kit: four electronic sounds for each of KICK and HAT, from the tamest to the strangest. A knob picks one (acid_tables.h, 8-bit mu-law), played back as they are */
 static const uint16_t DK[4] = {0x1111, 0x1151, 0x0911, 0x1111};      /* kick, per pattern */
+static const uint16_t DS[4] = {0x1010, 0x1010, 0x1010, 0x1010};      /* the snare, on 2 and 4 */
 static const uint16_t DO[4] = {0x4444, 0x4444, 0x4444, 0x4444};      /* the open hi-hat, on the offbeats */
-static struct { int32_t kl, hl; uint32_t ki, hi; } K;
+static struct { int32_t kl, sl, hl; uint32_t ki, hi; } K;
 static struct { uint32_t tick, step, seed, pos[3], idx[3]; uint8_t on[3]; fx_t fx; } D;
 static int32_t d_duck;                          /* the kit presses the others down on every hit (a sidechain) */
 
 static uint32_t rate24(int32_t sh_q8) { uint32_t s16 = (uint32_t)sh_q8 >> 4; return FR24[s16 & 15u] >> (s16 >> 4); }   /* 2^-shift in Q24 */
 static void kit_block(void)                     /* one kick and one hat, plain and clean: the knobs are their levels */
 {
-    K.kl = POW06[P[24] > 127u ? 127u : P[24]]; K.hl = POW06[P[26] > 127u ? 127u : P[26]];
-    K.ki = 0u; K.hi = 1u;
+    K.kl = POW06[P[24] > 127u ? 127u : P[24]]; K.sl = POW06[P[25] > 127u ? 127u : P[25]]; K.hl = POW06[P[26] > 127u ? 127u : P[26]];
+    K.ki = 0u; K.hi = 0u;
 }
 static int32_t kplay(uint32_t n, int32_t lvl)   /* one sound, linear interpolation, ends by itself */
 {
@@ -241,10 +243,12 @@ static int32_t drums(void)
     if (D.tick == 0 && a_run && !d_off) {                              /* a 16th: which drums hit */
         st = D.step; D.step = (D.step + 1u) & 15u;
         if (P[24] && (DK[0] >> st & 1u)) { D.on[0] = 1; D.pos[0] = 0; D.idx[0] = K.ki; d_duck = K.kl * 190; }
+        if (P[25] && (DS[0] >> st & 1u)) { D.on[1] = 1; D.pos[1] = 0; D.idx[1] = 0; if (K.sl * 130 > d_duck) d_duck = K.sl * 130; }
         if (P[26] && (DO[0] >> st & 1u)) { D.on[2] = 1; D.pos[2] = 0; D.idx[2] = K.hi; }
     }
     if (++D.tick >= d_len) D.tick = 0;
     if (D.on[0]) y += kplay(0, K.kl);
+    if (D.on[1]) y += kplay(1, K.sl);
     if (D.on[2]) y += kplay(2, K.hl);
     y = fx_run(&D.fx, y, (int32_t)P[27]);                                /* CRUSH */
     y = soft(y);                                                       /* the kit is glued by a soft clip */
@@ -258,7 +262,8 @@ static struct {
     int32_t amp, f, q;
     svf_t sv, sv2;
     fx_t fx;
-    int32_t dlp, clp;
+    int32_t dlp, clp, flp;
+    uint32_t ph8;
 } B;
 
 static int32_t fcoef(uint32_t hz)               /* 2 sin(pi f / 44100) in Q15 (a short series: the formants are under 2.4 kHz) */
@@ -1118,7 +1123,7 @@ static int32_t x_sample(void)
 
 static void app_audio(int32_t *out, uint32_t n)
 {
-    static uint32_t blk, dfb = 14746u, q_seen, qr_seen, h_seen, h_tail;
+    static uint32_t blk, dfb = 14746u, q_seen, qr_seen, h_seen, h_tail, elen = 6014u, eglen = 3608u;
     static int32_t ds0, ds1, ds3, ds4, dwet = 256;
     uint32_t i, t0 = fm1_ticks();
     for (i = 0; i < n; i++) {
@@ -1145,13 +1150,17 @@ static void app_audio(int32_t *out, uint32_t n)
             {
                 int32_t dk = (int32_t)(P[6] > 127u ? 127u : P[6]);
                 uint32_t t;
-                ds0 = (ez((uint32_t)dk) * (256 + (dk * dk * 77) / 16129)) >> 8;       /* the ARP delay: sent more and more as the knob goes up */
+                ds0 = (ez((uint32_t)(dk + (int32_t)(P[31] > 127u ? 127u : P[31]) * 25 / 100 > 127 ? 127 : dk + (int32_t)(P[31] > 127u ? 127u : P[31]) * 25 / 100)) * (256 + (dk * dk * 77) / 16129)) >> 8;       /* the ARP delay: sent more and more as the knob goes up */
                 ds1 = ez(P[18]); ds3 = ez(P[54]); ds4 = ez(P[29]);
                 mx = ds0 > ds1 ? ds0 : ds1; if (ds3 > mx) mx = ds3; if (ds4 > mx) mx = ds4;
                 t = (uint32_t)dk * 4500u / 127u; t = t * (uint32_t)(870 + dk * 154 / 127) >> 10;
                 dfb = 11000u + 190u * (uint32_t)mx + t;                    /* the more you send, the longer it rings (The Edge at the top of the knob) */
                 if (dfb > 28000u) dfb = 28000u;
                 dwet = 256 + dk * 64 / 127;                                  /* and the echoes get louder too */
+                {
+                    uint32_t rq = RUSHQ[P[31] > 127u ? 127u : P[31]];             /* RUSH: the ARP's 16th gets shorter, softly */
+                    elen = step_len * 256u / rq; eglen = gate_len * 256u / rq;
+                }
                 if (h_seen != h_evt) { h_seen = h_evt; h_tail = 5u * 44100u; }
                 if (h_tail) { h_tail = h_tail > 32u ? h_tail - 32u : 0u; if (dfb < 25000u) dfb = 25000u; if (dwet < 358) dwet = 358; }   /* after HOME the echoes die away slowly */
             }
@@ -1163,8 +1172,8 @@ static void app_audio(int32_t *out, uint32_t n)
         /* ARP: the line's clock, a 16th, sample-accurate */
         if (a_run && a_mask) {
             if (LA.tick == 0) arp_step();
-            else if (LA.tick == gate_len) LA.gate = 0;
-            if (++LA.tick >= step_len) LA.tick = 0;
+            else if (LA.tick == eglen) LA.gate = 0;
+            if (++LA.tick >= elen) LA.tick = 0;
         } else {
             LA.tick = 0; LA.gate = 0; LA.pos = 0; seq_cur = 255u;
         }
@@ -1204,9 +1213,12 @@ static void app_audio(int32_t *out, uint32_t n)
                 in = ((((int32_t)c1 >> 16) + ((int32_t)c2 >> 16)) * 3) >> 3;
                 in += (int32_t)B.ph3 < 0 ? 12000 : -12000;
                 lb = svf(&B.sv2, svf(&B.sv, in, B.f, 36000), B.f, B.q);
-                if (P[14]) {                                              /* FOLD: the wave is folded back on itself, before the drive */
-                    int32_t fz = (lb * (8 + (int32_t)((P[14] * 56u) >> 7))) >> 3;
+                if (P[14]) {                                              /* FOLD, deep: the wave folds back on itself, an octave below joins it, and the top is rounded off */
+                    int32_t fz = (lb * (256 + (int32_t)(P[14] * 640u / 127u))) >> 8, sb;
                     lb = (((fz - 16384) & 65535) - 32768); lb = (lb < 0 ? -lb : lb) - 16384;
+                    B.ph8 += B.incb >> 1; sb = (int32_t)B.ph8 >> 16; sb = (sb < 0 ? -sb : sb) - 16384;
+                    lb += (sb * (int32_t)P[14]) >> 8;
+                    B.flp += ((lb - B.flp) * (256 - (int32_t)(P[14] * 196u / 127u))) >> 8; lb = B.flp;
                 }
                 if (P[15]) {                                              /* RING: multiplied by a second, out-of-tune wave: metal, a spaceship, then pieces */
                     int32_t x;
@@ -1232,12 +1244,13 @@ static void app_audio(int32_t *out, uint32_t n)
 
         /* FM1 */
         ys = 0;
-        if (!s_off) { ys = sig_voice(); ys = fx_run(&FXS, ys, (int32_t)P[43]); ys = (ys * (int32_t)(VOL[4] + 1u) * 12) >> 9; }
+        if (!s_off) { ys = sig_voice(); ys = fx_run(&FXS, ys, (int32_t)P[43]); ys = (ys * (int32_t)(VOL[4] + 1u) * 40) >> 9; }
 
-        yd = drums() * 2;
+        yd = (drums() * 5) >> 2;                                       /* the kit: louder, but its peaks are tamed (no clipping) */
+        if (yd > 44000) yd = 44000 + ((yd - 44000) >> 2); else if (yd < -44000) yd = -44000 + ((yd + 44000) >> 2);
         yf = (x_sample() * 87) >> 6;
         {
-            int32_t wl, wr, vl, vr, a0, a1, ml, mr, dry = (int32_t)(((int64_t)((ya * 243 + yb * 134 + ys * 154 + yq * 179) >> 7) * (32768 - d_duck)) >> 15) + yd + yf;
+            int32_t wl, wr, vl, vr, a0, a1, ml, mr, dry = (int32_t)(((int64_t)((ya * 243 + yb * 90 + ys * 154 + yq * 179) >> 7) * (32768 - d_duck)) >> 15) + yd + yf;
             uint32_t dt = dlen << 8, di, df;
             if (dq < dt) { dq += 64u; if (dq > dt) dq = dt; }              /* a new tempo: the echo slides to its new time (up to 25% pitch bend) */
             else if (dq > dt) { dq -= 64u; if (dq < dt) dq = dt; }
@@ -1487,11 +1500,11 @@ static void draw_battery(uint32_t raw)          /* top right: a battery with fou
 static const uint16_t VCOL[7] = {C_ARP, C_WAV, C_KIT, C_VOX, C_FM1, C_SEQ, C_SFX};
 static const uint8_t VORD[4] = {0, 1, 2, 4};                    /* the PRESETS knob, left to right: ARP WAV KIT A09 */
 static const uint8_t PGN[7] = {1, 1, 1, 1, 1, 1, 1};               /* pages per voice: one, the FX key does nothing */
-static const uint8_t UIMAP[7][2][4] = {{{0, 6, 5, 8}}, {{17, 19, 20, 23}}, {{24, 26, 29, 27}}, {{36, 37, 38, 39}}, {{40, 41, 42, 43}}, {{48, 50, 51, 54}}, {{60, 61, 62, 63}}};
+static const uint8_t UIMAP[7][2][4] = {{{0, 6, 5, 31}}, {{17, 19, 20, 14}}, {{24, 25, 26, 27}}, {{36, 37, 38, 39}}, {{40, 41, 42, 43}}, {{48, 50, 51, 54}}, {{60, 61, 62, 63}}};
 static const char *const UINAME[7][2][4] = {
-    {{"CUTOFF", "DELAY", "RANGE", "CRUSH"}, {"", "", "", ""}},
-    {{"DRIVE", "WARP", "FM", "CRUSH"}, {"", "", "", ""}},
-    {{"KICK", "HAT", "DELAY", "CRUSH"}, {"", "", "", ""}},
+    {{"CUTOFF", "DELAY", "RANGE", "RUSH"}, {"", "", "", ""}},
+    {{"DRIVE", "WARP", "FM", "FOLD"}, {"", "", "", ""}},
+    {{"KICK", "SNARE", "HAT", "CRUSH"}, {"", "", "", ""}},
     {{"VOWEL", "ROBOT", "DELAY", "CRUSH"}, {"", "", "", ""}},
     {{"TUNE", "FINE", "GHOST", "CRUSH"}, {"", "", "", ""}},
     {{"CUTOFF", "ENV MOD", "DECAY", "DELAY"}, {"", "", "", ""}},
