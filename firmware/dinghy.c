@@ -266,7 +266,7 @@ static struct {
     svf_t sv, sv2;
     fx_t fx;
     int32_t dlp, clp, flp;
-    uint32_t ph8;
+    uint32_t ph8, inc3, pp;
 } B;
 
 static int32_t fcoef(uint32_t hz)               /* 2 sin(pi f / 44100) in Q15 (a short series: the formants are under 2.4 kHz) */
@@ -1127,14 +1127,15 @@ static int32_t x_sample(void)
 static void app_audio(int32_t *out, uint32_t n)
 {
     static uint32_t blk, dfb = 14746u, q_seen, qr_seen, h_seen, h_tail, elen = 6014u, eglen = 3608u;
-    static int32_t ds0, ds1, ds3, ds4, dwet = 256;
+    static int32_t ds0, ds1, ds3, ds4, dwet = 256, pdep;
+    static uint32_t pr;
     uint32_t i, t0 = fm1_ticks();
     for (i = 0; i < n; i++) {
         int32_t ya, yb, yq, ys, yd, yf;
         if (blk == 0) {                         /* every 32 frames: envelopes, filter coefficients */
             int32_t idx, bar_fr, fb, mx;
             uint32_t bar;
-            lead_block(&LA, 0); lead_block(&LQ, 48); kit_block();
+            lead_block(&LA, 0); lead_block(&LQ, 48);
             q_gate = ((uint32_t)step_len * (762u + 14u * P[49])) / 1270u;           /* SEQ STRETCH */
             gate_len = ((uint32_t)step_len * (762u + 14u * P[1])) / 1270u;          /* ARP STRETCH: the gate stays open 0.6 .. 2 steps */
             LA.incb = LA.inc_t;
@@ -1147,7 +1148,16 @@ static void app_audio(int32_t *out, uint32_t n)
             if (bar_fr < 0) bar_fr = 0;
             fb = 32768 - (((bar_fr * ez(P[19])) >> 7) >> 1);
             B.incb = (uint32_t)(((uint64_t)b_inc * (uint32_t)fb) >> 15);
-            B.inc2 = B.incb + (uint32_t)(((uint64_t)B.incb * 24u) >> 11);                    /* the second saw, a little out of tune */
+            {
+                uint32_t dtq = (uint32_t)ez(P[19] > 127u ? 127u : P[19]);                    /* DETUNE: the second saw climbs away (up to a tritone) and the sub square falls away from it: it never settles */
+                B.inc2 = B.incb + (uint32_t)(((uint64_t)B.incb * 24u) >> 11) + (uint32_t)(((uint64_t)B.incb * dtq * 53u) >> 14);
+                B.inc3 = B.incb - (uint32_t)(((uint64_t)B.incb * dtq * 37u) >> 14);
+                {
+                    uint32_t pk = P[15] > 127u ? 127u : P[15];                                 /* PULSE: the drone throbs, slowly at first, then faster and deeper */
+                    pr = (800u + 11000u * pk / 127u) * 97391u / 1000u;               /* the rate and the depth grow evenly along the whole knob */
+                    { uint32_t q; for (q = 0; q < 127u && (q + 1u) * (q + 1u) <= pk * 127u; q++) { } pdep = (int32_t)(q * 220u); }     /* the depth rises fast at first (the pulse is heard early), then fills up */
+                }
+            }
             dlen = 3u * step_len;                                          /* the delay: a dotted eighth (halved until it fits, at very slow tempi) */
             while (dlen > 32000u) dlen >>= 1;
             {
@@ -1197,13 +1207,14 @@ static void app_audio(int32_t *out, uint32_t n)
         /* WAV */
         yb = 0;
         {
-            int32_t g = b_gate, in, lb;
+            int32_t g = b_gate, in, lb, sbt = 0;
             if (B.amp < g) { B.amp += 600; if (B.amp > g) B.amp = g; }
             else if (B.amp > g) { B.amp -= 10; if (B.amp < g) B.amp = g; }
             if (B.amp) {
                 uint32_t c1, c2;
                 int32_t fmb = ez(P[20]);
-                B.ph1 += B.incb; B.ph2 += B.inc2; B.ph3 += B.incb;
+                B.ph1 += B.incb; B.ph2 += B.inc2; B.ph3 += B.inc3;
+                B.ph8 += B.incb >> 1; sbt = (int32_t)B.ph8 >> 16; sbt = (sbt < 0 ? -sbt : sbt) - 16384;      /* a triangle an octave below */
                 c1 = B.ph1; c2 = B.ph2;
                 if (fmb) {                                                /* FM */
                     int32_t x;
@@ -1216,18 +1227,14 @@ static void app_audio(int32_t *out, uint32_t n)
                 in = ((((int32_t)c1 >> 16) + ((int32_t)c2 >> 16)) * 3) >> 3;
                 in += (int32_t)B.ph3 < 0 ? 12000 : -12000;
                 lb = svf(&B.sv2, svf(&B.sv, in, B.f, 36000), B.f, B.q);
-                if (P[14]) {                                              /* FOLD, deep: the wave folds back on itself, an octave below joins it, and the top is rounded off */
-                    int32_t fz = (lb * (256 + (int32_t)(P[14] * 640u / 127u))) >> 8, sb;
-                    lb = (((fz - 16384) & 65535) - 32768); lb = (lb < 0 ? -lb : lb) - 16384;
-                    B.ph8 += B.incb >> 1; sb = (int32_t)B.ph8 >> 16; sb = (sb < 0 ? -sb : sb) - 16384;
-                    lb += (sb * (int32_t)P[14]) >> 8;
-                    B.flp += ((lb - B.flp) * (256 - (int32_t)(P[14] * 196u / 127u))) >> 8; lb = B.flp;
-                }
-                if (P[15]) {                                              /* RING: multiplied by a second, out-of-tune wave: metal, a spaceship, then pieces */
-                    int32_t x;
-                    B.ph5 += (uint32_t)(((uint64_t)B.incb * (141u + P[15]) * 5243u) >> 19);   /* x (1.41 + RING / 100) */
-                    x = (int32_t)B.ph5 >> 16; x = (x < 0 ? -x : x) - 16384;
-                    lb = lb + (((((int32_t)(((int64_t)lb * x) >> 14)) - lb) * (int32_t)P[15]) >> 7);
+                if (pdep) {                                               /* PULSE: boom, boom, boom: every beat of the throb is a low thump, like the RUSH but in the bass */
+                    int32_t e, gn;
+                    uint32_t p;
+                    B.pp += pr; p = B.pp >> 17;
+                    e = (int32_t)(((int64_t)(32767u - p) * (int64_t)(32767u - p)) >> 15);
+                    gn = 32768 - (int32_t)(((int64_t)(32768 - e) * pdep) >> 15);
+                    lb = (int32_t)(((int64_t)lb * gn) >> 15);
+                    lb += (int32_t)(((((int64_t)sbt * e) >> 15) * pdep) >> 15);
                 }
                 {                                                         /* DRIVE: a smooth tanh saturation, a little warmer (darker) as it goes up */
                     uint32_t dg = P[17] > 127u ? 127u : P[17], at, ti;
@@ -1236,6 +1243,11 @@ static void app_audio(int32_t *out, uint32_t n)
                     if (at >= 131072u) th = 32767; else { ti = at >> 9; th = TANHQ[ti] + (((TANHQ[ti + 1u] - TANHQ[ti]) * (int32_t)(at & 511u)) >> 9); }
                     yb = (th * 29491) >> 15; if (t < 0) yb = -yb;
                     B.dlp += ((yb - B.dlp) * (256 - (int32_t)(dg * 154u / 127u))) >> 8; yb = B.dlp;
+                    if (dg > 64u) {                                   /* the top of DRIVE: the engines rumble (a sub octave) and the whole thing swells */
+                        uint32_t ex = dg - 64u;
+                        yb += (int32_t)(((int64_t)sbt * (int64_t)ex * 1) >> 7);
+                        yb = (int32_t)(((int64_t)yb * (int32_t)(256u + ex * 1u)) >> 8);
+                    }
                     B.fx.bass = 1u;
                     yb = fx_run(&B.fx, yb, (int32_t)P[23]);
                     B.clp += ((yb - B.clp) * (256 - (int32_t)(ez(P[23]) * 190u >> 7))) >> 8; yb = B.clp;   /* the crush of the bass stays deep: its harsh top is rounded off */
@@ -1247,13 +1259,12 @@ static void app_audio(int32_t *out, uint32_t n)
 
         /* FM1 */
         ys = 0;
-        if (!s_off) { ys = sig_voice(); ys = fx_run(&FXS, ys, (int32_t)P[43]); ys = (ys * (int32_t)(VOL[4] + 1u) * 32) >> 9; }
+        if (!s_off) { ys = sig_voice(); ys = fx_run(&FXS, ys, (int32_t)P[43]); ys = (ys * (int32_t)(VOL[4] + 1u) * 27) >> 9; }
 
-        yd = (drums() * 7) >> 2;                                /* the kit, as loud as in the first FirmWare; only its highest peaks are rounded off */
-        if (yd > 60000) yd = 60000 + ((yd - 60000) >> 2); else if (yd < -60000) yd = -60000 + ((yd + 60000) >> 2);
+        yd = 0;                                                 /* no kit any more: ARP, WAV and the radio */
         yf = (x_sample() * 87) >> 6;
         {
-            int32_t wl, wr, vl, vr, a0, a1, ml, mr, dry = (int32_t)(((int64_t)((ya * 243 + yb * 110 + ys * 154 + yq * 179) >> 7) * (32768 - d_duck)) >> 15) + yd + yf;
+            int32_t wl, wr, vl, vr, a0, a1, ml, mr, dry = (int32_t)(((int64_t)((ya * 243 + yb * 125 + ys * 154 + yq * 179) >> 7) * (32768 - d_duck)) >> 15) + yd + yf;
             uint32_t dt = dlen << 8, di, df;
             if (dq < dt) { dq += 64u; if (dq > dt) dq = dt; }              /* a new tempo: the echo slides to its new time (up to 25% pitch bend) */
             else if (dq > dt) { dq -= 64u; if (dq < dt) dq = dt; }
@@ -1501,12 +1512,11 @@ static void draw_battery(uint32_t raw)          /* top right: a battery with fou
 #define C_SEQ RGB(255, 184, 112)
 #define C_SFX RGB(111, 227, 224)
 static const uint16_t VCOL[7] = {C_ARP, C_WAV, C_KIT, C_VOX, C_FM1, C_SEQ, C_SFX};
-static const uint8_t VORD[4] = {0, 1, 2, 4};                    /* the PRESETS knob, left to right: ARP WAV KIT A09 */
-static const uint8_t PGN[7] = {1, 1, 1, 1, 1, 1, 1};               /* pages per voice: one, the FX key does nothing */
-static const uint8_t UIMAP[7][2][4] = {{{0, 6, 5, 31}}, {{17, 19, 20, 14}}, {{24, 25, 26, 27}}, {{36, 37, 38, 39}}, {{40, 41, 42, 43}}, {{48, 50, 51, 54}}, {{60, 61, 62, 63}}};
+static const uint8_t VORD[3] = {0, 1, 4};                       /* the PRESETS knob, left to right: ARP WAV A09 */
+static const uint8_t UIMAP[7][2][4] = {{{6, 5, 0, 31}}, {{17, 19, 20, 15}}, {{24, 25, 26, 27}}, {{36, 37, 38, 39}}, {{40, 41, 42, 43}}, {{48, 50, 51, 54}}, {{60, 61, 62, 63}}};
 static const char *const UINAME[7][2][4] = {
-    {{"CUTOFF", "DELAY", "RANGE", "RUSH"}, {"", "", "", ""}},
-    {{"DRIVE", "WARP", "FM", "FOLD"}, {"", "", "", ""}},
+    {{"DELAY", "RANGE", "CUTOFF", "RUSH"}, {"", "", "", ""}},
+    {{"DRIVE", "DETUNE", "FM", "PULSE"}, {"", "", "", ""}},
     {{"KICK", "SNARE", "HAT", "CRUSH"}, {"", "", "", ""}},
     {{"VOWEL", "ROBOT", "DELAY", "CRUSH"}, {"", "", "", ""}},
     {{"TUNE", "FINE", "GHOST", "CRUSH"}, {"", "", "", ""}},
@@ -1667,11 +1677,10 @@ static void app_main(void)
         if (b & (1u << BTN_SEL)) {
             if (tg == 5u) { if (sqn) sqn--; sqc = sqn % 16u; if (!sqn) sqrun = 0; }   /* SEQ: delete the last step */
         }
-        if (b & (1u << BTN_FX)) set.page = (uint8_t)((set.page + 1u) % PGN[tg]);
 
-        if ((e = fm1_enc_take(ENC_PRESETS)) != 0) {   /* left to right: ARP WAV KIT A09 */
+        if ((e = fm1_enc_take(ENC_PRESETS)) != 0) {   /* left to right: ARP WAV A09 */
             int32_t t = (int32_t)set.pos + (e > 0 ? 1 : -1);
-            t = t < 0 ? 0 : t > 3 ? 3 : t;
+            t = t < 0 ? 0 : t > 2 ? 2 : t;
             if ((uint8_t)t != set.pos) { set.page = 0; q_rec = 0; }      /* every voice starts on page A */
             set.pos = (uint8_t)t; set.tgt = VORD[t]; tg = set.tgt;
         }
@@ -1694,13 +1703,7 @@ static void app_main(void)
         }
         for (k = 0; k < NP; k++) P[k] = set.v[k];
         for (k = 0; k < 7u; k++) VOL[k] = set.vol[k];
-        if ((e = fm1_enc_take(ENC_SELECT)) != 0) {
-            uint8_t *bp = tg == 2u && d_free ? &set.dbpm : &set.bpm;   /* one tempo for all; the kit follows it, unless SEL has let it go */
-            int32_t x = (int32_t)*bp + ((fm1_ms - kt[5] < 90u || e > 1 || e < -1) ? 5 : 1) * e;   /* 1 BPM a click, 5 when you turn fast */
-            kt[5] = fm1_ms;
-            *bp = (uint8_t)(x < 20 ? 20 : x > 200 ? 200 : x);
-            if (tg == 2u && d_free) apply_dtempo(*bp); else { apply_tempo(*bp); if (!d_free) apply_dtempo(*bp); }
-        }
+        (void)fm1_enc_take(ENC_SELECT);                 /* SELECT (the tempo) is not used: the RUSH is the tempo */
 
         for (k = 0; k < 27u; k++) {             /* held keys, the latched chord, the bass key, the SEQ step that plays */
             uint32_t on = (keys >> k & 1u) || (b_gate && k == b_key) || (a_mask >> k & 1u) || (tg == 5u && sqrun && k == q_cur) || 0;
