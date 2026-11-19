@@ -1,5 +1,5 @@
 {
-  "what": "Minimalist, instinctive FirmWare: no menu, no sound presets, everything is played with the knobs. Only the Home key stays active. Three voices to play alone or chain together: ARP arpeggiator, WAV drone, A09 ghost radio.",
+  "what": "Arp Wav 09 is a minimalist & instinctive FirmWare, built around playing. I disabled all the Fm-1’s keys. Only the Home key stays active. Everything is played with knobs. Experiment with the three voices. No sound preset. You play with the synthetizer's signal in real time.",
   "author": "Wav.09.02",
   "kinds": ["synth"],
   "play": "https://wav0902.github.io/wav-fm1/",
