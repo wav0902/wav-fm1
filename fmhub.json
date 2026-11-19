@@ -1,14 +1,5 @@
 {
-  "what": "Arp Wav 09 is a minimalist & instinctive FirmWare, for the Fm-1.
-
-Feels like an analog synthesizer again.
-
-I disabled all the Fm-1’s keys. Only the Home key stays active.
-Everything is played with knobs. Experiment with the three voices.
-No sound preset. You play with the synthesizer's signal in real time.
-
-Three voices.
-ARP / WAV / A09..",
+  "what": "Feels like an analog synthesizer again. I disabled all the Fm-1’s keys. Only the Home key stays active. Everything is played with knobs. Experiment with the three voices. No sound preset. You play with the Fm-1's signal in real time. Three voices. ARP / WAV / A09.",
   "author": "Wav.09.02",
   "kinds": ["synth"],
   "play": "https://wav0902.github.io/wav-fm1/",
