@@ -291,11 +291,12 @@ h1 .a { color: var(--acc); } h1 .w { color: var(--bass); } h1 .n { color: var(--
 .pill { border-radius: 2.8cqw; cursor: pointer; touch-action: none; display: block;
   background: linear-gradient(180deg, #7653b0, #5f3c9c); box-shadow: 0 .4cqw 0 #2a1850, inset 0 .14cqw 0 #ffffff30; }
 .pill.lit { background: linear-gradient(180deg, #8863bc, #7050aa); }
-.pill .slot { position: absolute; left: 50%; top: 15%; width: 17%; height: 52%; transform: translateX(-50%); background: #e9e4f4; border-radius: 1cqw; }
-.pill.b .slot { top: 12%; height: 40%; }
+.pill .slot { position: absolute; left: 50%; top: 17%; width: 12%; height: 56%; transform: translateX(-50%); background: #e9e4f4; border-radius: 1cqw; }
+.pill.b .slot { top: 30%; height: 30%; width: 11%; }
+.pill.b.bx .slot { top: 26%; height: 54%; width: 12%; }
 .pill.lit .slot { background: #eef6ff; box-shadow: 0 0 1.6cqw 0.3cqw #bcd8ff; }
 .pill .pl { position: absolute; left: 0; right: 0; bottom: 9%; text-align: center; font-size: 1.3cqw; font-weight: 800; color: var(--plabel); letter-spacing: .04em; pointer-events: none; }
-.pill .pk { position: absolute; left: 0; right: 0; bottom: 5%; text-align: center; font-size: .95cqw; font-weight: 800; color: #fff; opacity: .5; pointer-events: none; }
+.pill .pk { display: none; }
 .pill.b .pk { bottom: auto; top: 3%; }
 
 .legend { margin-top: 30px; display: flex; flex-direction: column; gap: 6px; font: 400 15px/1.4 var(--f-lcd); color: var(--dim); max-width: 760px; }
@@ -1264,6 +1265,7 @@ h1 .a { color: var(--acc); } h1 .w { color: var(--bass); } h1 .n { color: var(--
   var $ = function (id) { return document.getElementById(id); };
   var dev = $(&quot;device&quot;);
   function mk(tag, cls, html) { var e = document.createElement(tag); e.className = cls; if (html) e.innerHTML = html; return e; }
+  var KDY = 8;
   function put(el, cx, cy, w, h) {
     el.style.left = ((cx - w / 2) / 10) + &quot;%&quot;; el.style.top = ((cy - h / 2) / 6.13) + &quot;%&quot;;
     if (w) el.style.width = (w / 10) + &quot;%&quot;; if (h) el.style.height = (h / 6.13) + &quot;%&quot;;
@@ -1294,7 +1296,7 @@ h1 .a { color: var(--acc); } h1 .w { color: var(--bass); } h1 .n { color: var(--
     var blk = isBlack(k), p = mk(&quot;div&quot;, &quot;pill &quot; + (blk ? &quot;b&quot; : &quot;&quot;));
     p.dataset.k = k;
     p.innerHTML = &#x27;&lt;span class=&quot;slot&quot;&gt;&lt;/span&gt;&#x27; + (blk &amp;&amp; BL[bi] ? &#x27;&lt;span class=&quot;pl&quot;&gt;&#x27; + BL[bi] + &quot;&lt;/span&gt;&quot; : &quot;&quot;) + &#x27;&lt;span class=&quot;pk&quot;&gt;&lt;/span&gt;&#x27;;
-    if (blk) put(p, BX[bi++], 394, 47, 74); else put(p, WX[wi++], 487, 49, 90);
+    if (blk) { if (bi === BX.length - 1) p.classList.add(&quot;bx&quot;); put(p, BX[bi++], 394 + KDY, 47, 88); } else put(p, WX[wi++], 487 + KDY, 49, 90);
     els[k] = p; keyLabel[k] = p.querySelector(&quot;.pk&quot;); keyLabel[k].textContent = US[CODES[k]];
   }
   try {
