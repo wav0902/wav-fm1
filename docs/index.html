@@ -1404,7 +1404,7 @@ h1 .a { color: var(--acc); } h1 .w { color: var(--bass); } h1 .n { color: var(--
       last = s;
       var t = E.tgt;
       $(&quot;lcd&quot;).dataset.tgt = t; dev.dataset.tgt = t;
-      var ti = t === 6 ? 12 : t === 5 ? 10 + E.page : t === 4 ? 9 : t === 3 ? 8 : t === 2 ? 6 + E.page : t * 3 + E.page; $(&quot;lcdt&quot;).src = TITLES[ti]; $(&quot;lcdt&quot;).style.width = ([69, 103, 103, 72, 105, 105, 66, 66, 72, 72, 104, 105, 74][ti] / 240 * 100) + &quot;%&quot;;
+      var ti = t === 6 ? 12 : t === 5 ? 10 + E.page : t === 4 ? 9 : t === 3 ? 8 : t === 2 ? 6 + E.page : t * 3 + E.page; $(&quot;lcdt&quot;).src = TITLES[ti]; $(&quot;lcdt&quot;).style.width = ([69, 103, 103, 72, 105, 105, 66, 66, 72, 72, 104, 105, 74][ti] * 0.85 / 240 * 100) + &quot;%&quot;;
       for (var i = 0; i &lt; 4; i++) { $(&quot;l&quot; + i).textContent = pname(E.page, i); $(&quot;b&quot; + i).style.width = (E.v[pidx(t, E.page, i)] / 127 * 100) + &quot;%&quot;; }
       $(&quot;b4&quot;).style.width = (E.vol[t] / 127 * 100) + &quot;%&quot;;
       $(&quot;lcdst&quot;).textContent = (E.tgt === 2 &amp;&amp; E.dfree ? E.dbpm : E.bpm) + &quot;  &quot; + (E.tgt === 0 ? MODES[0] : E.tgt === 2 ? &quot;FLOOR&quot; : &quot;&quot;) + (E.tgt === 5 ? (E.sqrun ? &quot;  PLAY  &quot; : &quot;  EDIT  &quot;) : E.run ? &quot;  &quot; : &quot;  STOP  &quot;) + (E.octv[E.tgt] &lt; 0 ? &quot;-&quot; : &quot;+&quot;) + Math.abs(E.octv[E.tgt]) + (E.tgt === 2 &amp;&amp; E.dfree ? &quot;  FREE&quot; : &quot;&quot;);
