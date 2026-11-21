@@ -1,14 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* ARP WAV 09: a minimal synth for the FM-1, built on Dinghy. No presets, no saves: switch on, turn the knobs.
  *
- *   PRESETS             four voices, left to right: ARP, WAV, KIT, A09 (keys, knobs and volume act on that voice)
+ *   PRESETS             three voices, left to right: ARP, WAV, A09 (the keys, the knobs and the volume act on that voice)
  *   KEYS (all 27)       ARP: hold a chord and let go, it keeps arpeggiating (latch). WAV: a drone, until the next key.
- *   KNOB 1..4           ARP  cutoff, range, delay, stretch
- *                       WAV  cutoff, warp, fm, fold
- *                       KIT  kick, hat, delay, crush      (both go from the tamest to the strangest sound)
- *                       A09  tune, fine, ghost, alien     (a radio: four of eighteen stations are drawn at every power-on)
- *   ALGORITHM           volume of the voice     SELECT  tempo     MASTER  the original master volume
- *   HOME                stop everything         OCT- OCT+  octave of the voice
+ *   KNOB 1..4           ARP  delay, range, cutoff, rush        (clean: never saturated)
+ *                       WAV  drive, fm, fold, pulse            (soft at first, then a spaceship that tears itself apart)
+ *                       A09  tune, fine, drift, noise          (a radio: four of seventeen stations are drawn at every power-on)
+ *   ALGORITHM           volume of the voice     MASTER  the original master volume
+ *   HOME                stop everything (the echoes die away)
  *
  * Integers only (no FPU, no libgcc). The tables are in acid_tables.h. */
 #define APP_NAME "ARP WAV 09"
@@ -102,6 +101,32 @@ static int32_t vlim(int32_t x)                  /* clean up to 12000; only the r
 }
 static int32_t ez(uint32_t v) { return EZ[v > 127u ? 127u : v]; }   /* every effect knob starts gently and takes over little by little */
 
+/* ---- CLEAN: the ARP is never saturated. Its level is set so that it never reaches the limiter; the limiter (instant attack, slow release: a gain, not a distortion) only catches the rare peak.
+ * tclip: the delay lines are linear up to 24000, past that they round off smoothly, so the echoes ring without a trace of distortion. */
+#define FOLDC(f) ((f) < 32u ? 16970 + (int32_t)(9230u * (32u - (f)) * (32u - (f)) / 961u) : 16970)   /* the level kept equal as the fold grows (measured) */
+#define PULSEC(d) 46500                         /* and as the throb takes the level down (measured) */
+#define ARP_K0 2000                             /* the ARP's level at the lowest cutoff (x 1/262144, with the voice volume) */
+#define ARP_K1 720                              /* how much quieter it is made as the cutoff opens: as loud open as closed */
+#define ARP_LIM 19000                           /* the ARP's ceiling, before the mix */
+#define RADIO_K 8                               /* the radio's level (x 1/512, with the voice volume) */
+#define RADIO_LIM 40000                         /* the radio's ceiling, before the mix */
+#define DLY_LIM 16000                           /* the echoes' ceiling, inside the delay loop */
+static int32_t lim_g = 32768, lim_l = 32768, lim_r = 32768, lim_s = 32768;
+static int32_t limit(int32_t *g, int32_t x, int32_t top)   /* a gain, not a distortion: it drops at once when a peak comes, and creeps back */
+{
+    int32_t y = (int32_t)(((int64_t)x * *g) >> 15), a = y < 0 ? -y : y;
+    if (a > top) { uint32_t ax = (uint32_t)(x < 0 ? -x : x); *g = (int32_t)(((uint32_t)top << 15) / ax); y = x < 0 ? -top : top; }
+    else if (*g < 32768) *g += ((32768 - *g) >> 12) + 1;               /* back to unity in about a tenth of a second */
+    return y;
+}
+static int32_t arp_limit(int32_t x) { return limit(&lim_g, x, ARP_LIM); }
+static int32_t tclip(int32_t x)
+{
+    int32_t a = x < 0 ? -x : x;
+    if (a > 24000) { uint32_t o = (uint32_t)(a - 24000); a = 24000 + (int32_t)(o * 8767u / (o + 8767u)); }
+    return x < 0 ? -a : a;
+}
+
 #define DMASK 32767u                            /* a ping-pong delay: a left and a right line of 0.74 s, shared by every voice (the pool) */
 static int16_t dl[32768] __attribute__((section(".pool")));
 static int16_t dr[32768] __attribute__((section(".pool")));
@@ -148,7 +173,7 @@ static void lead_block(lead_t *l, uint32_t o)   /* every 32 frames: envelopes an
     idx = (o ? (int32_t)P[o] : 30 + (int32_t)(P[0] * 76u / 100u)) + ((env2(l->env_f) * (int32_t)P[o + 2]) >> 7);
     if (idx > 127) idx = 127;
     l->f = CUT_F[idx];
-    l->q = resq(25u + ((uint32_t)ez(P[o + 4]) * 70u >> 7));           /* RESO: gentle at first, then it squeals */
+    l->q = resq(25u + ((uint32_t)ez(P[o + 4]) * 70u >> 7) );           /* RESO: gentle at first, then it squeals */
     l->tgt = l->env_a;
 }
 
@@ -165,17 +190,17 @@ static int32_t lead_sample(lead_t *l, uint32_t o, uint32_t vol)
         x = (int32_t)l->mp >> 16; x = (x < 0 ? -x : x) - 16384;
         c += (uint32_t)(x * ez(fmv)) << 11;
     }
-    la = svf(&l->sv2, svf(&l->sv, (int32_t)c >> 16, l->f, 36000), l->f, l->q);   /* two stages: 24 dB/oct, the resonance on the second */
+    la = svf(&l->sv2, svf(&l->sv, o ? (int32_t)c >> 16 : ((int32_t)c >> 16) * 3 >> 2, l->f, 36000), l->f, l->q);   /* two stages: 24 dB/oct, the resonance on the second (the ARP's saw has headroom: nothing is ever clipped) */
     if (la > 32767) la = 32767; else if (la < -32767) la = -32767;
     if (o && P[55]) {                                                /* FOLD (SEQ): the wave is folded back on itself */
         int32_t fz = (la * (8 + (int32_t)((P[55] * 56u) >> 7))) >> 3;
         la = (((fz - 16384) & 65535) - 32768); la = (la < 0 ? -la : la) - 16384;
     }
     l->amp += (l->tgt - l->amp) >> 4;
-    ya = soft((int32_t)(((int64_t)la * l->amp) >> 15));
-    ya = fx_run(&l->fx, ya, (int32_t)(o ? P[59] : P[8]));
-    if (o) return (ya * (int32_t)(vol + 1u) * 13) >> 10;
-    return (int32_t)(((int64_t)ya * (int32_t)(vol + 1u) * (3482 - (int32_t)(1229u * P[0] / 127u))) >> 18);   /* the ARP: 8 x (1.7 - 0.6 x cutoff): as loud open as closed */
+    ya = (int32_t)(((int64_t)la * l->amp) >> 15);                    /* no saturation: the ARP is clean, its level is only ever turned down */
+    if (o) return (soft(ya) * (int32_t)(vol + 1u) * 13) >> 10;
+    ya = fx_run(&l->fx, ya, (int32_t)P[8]);
+    return (int32_t)(((int64_t)ya * (int32_t)(vol + 1u) * (ARP_K0 - (int32_t)(ARP_K1 * P[0] / 127u))) >> 18);   /* the ARP: as loud open as closed */
 }
 
 static void arp_fire(uint32_t key, uint32_t up)
@@ -221,7 +246,10 @@ static int32_t d_duck;                          /* the kit presses the others do
 static uint32_t rate24(int32_t sh_q8) { uint32_t s16 = (uint32_t)sh_q8 >> 4; return FR24[s16 & 15u] >> (s16 >> 4); }   /* 2^-shift in Q24 */
 static void kit_block(void)                     /* one kick and one hat, plain and clean: the knobs are their levels */
 {
-    K.kl = POW06[P[24] > 127u ? 127u : P[24]]; K.sl = POW06[P[25] > 127u ? 127u : P[25]]; K.hl = POW06[P[26] > 127u ? 127u : P[26]];
+    uint32_t r, q;                              /* the old kit's levels (115 at the top), the knob only brings each one up: level = 115 * (knob/127)^0.3 */
+    r = 115u * POW06[P[24] > 127u ? 127u : P[24]]; for (q = 0; q < 120u && (q + 1u) * (q + 1u) <= r; q++) { } K.kl = (int32_t)q;
+    r = 115u * POW06[P[25] > 127u ? 127u : P[25]]; for (q = 0; q < 120u && (q + 1u) * (q + 1u) <= r; q++) { } K.sl = (int32_t)q;
+    r = 115u * POW06[P[26] > 127u ? 127u : P[26]]; for (q = 0; q < 120u && (q + 1u) * (q + 1u) <= r; q++) { } K.hl = (int32_t)q;
     K.ki = 0u; K.hi = 0u;
 }
 static int32_t kplay(uint32_t n, int32_t lvl)   /* one sound, linear interpolation, ends by itself */
@@ -263,7 +291,8 @@ static struct {
     svf_t sv, sv2;
     fx_t fx;
     int32_t dlp, clp, flp;
-    uint32_t ph8;
+    uint32_t ph8, inc3, pp;
+    int32_t jit, rl, sag;                       /* PULSE: the throb's unsteady rate, the rumble (low noise), the pitch sag on every boom */
 } B;
 
 static int32_t fcoef(uint32_t hz)               /* 2 sin(pi f / 44100) in Q15 (a short series: the formants are under 2.4 kHz) */
@@ -275,13 +304,13 @@ static int32_t fcoef(uint32_t hz)               /* 2 sin(pi f / 44100) in Q15 (a
 
 /* ---- FM1: a radio. 20 stations hide on a long dial; at every power-on four are drawn, put in new places, and each one sounds a little different.
  * Everything is integers: phases are 32-bit turns, levels Q15, decays are "e -= e * rate >> 24" (RT(ms) gives the rate for a time constant). */
-#define NST 34u
+#define NST 40u
+#define NPOOL 17u                               /* the stations that can be drawn at power-on */
 #define RT(ms) (380449u / (ms))                 /* 2^24 / (44.1 * ms): the per-sample decay rate for a time constant in ms */
 #define MS(ms) ((uint32_t)(ms) * 441u / 10u)    /* ms -> samples */
 #define HZP(h) ((uint32_t)(h) * 97392u)         /* an integer Hz -> a 32-bit phase step */
 static uint32_t hz8p(uint32_t q8) { return (uint32_t)(((uint64_t)q8 * 97392u) >> 8); }   /* Q8 Hz -> phase step */
-static const uint16_t SGQ[NST] = {194, 256, 470, 209, 256, 256, 256, 256, 256, 75, 277, 256, 256, 256, 256, 256, 256, 256, 127, 190, 256, 1664, 256, 256, 185, 128, 256, 757, 300, 256, 256, 256, 256, 256};   /* so that every station is as loud as the others (x256) */
-static const uint16_t GH06[128] = {0, 1791, 2715, 3463, 4115, 4705, 5249, 5757, 6238, 6694, 7131, 7551, 7956, 8347, 8727, 9095, 9455, 9805, 10147, 10481, 10809, 11130, 11445, 11755, 12059, 12358, 12652, 12942, 13227, 13508, 13786, 14060, 14330, 14597, 14861, 15122, 15380, 15635, 15887, 16136, 16383, 16628, 16870, 17110, 17348, 17583, 17817, 18048, 18277, 18505, 18731, 18954, 19177, 19397, 19616, 19833, 20048, 20262, 20475, 20686, 20896, 21104, 21311, 21517, 21721, 21924, 22126, 22326, 22525, 22724, 22921, 23117, 23311, 23505, 23698, 23889, 24080, 24270, 24458, 24646, 24833, 25018, 25203, 25387, 25570, 25752, 25934, 26114, 26294, 26473, 26651, 26828, 27005, 27181, 27355, 27530, 27703, 27876, 28048, 28219, 28390, 28560, 28729, 28898, 29066, 29234, 29400, 29566, 29732, 29897, 30061, 30225, 30388, 30550, 30712, 30874, 31034, 31195, 31354, 31513, 31672, 31830, 31988, 32145, 32301, 32457, 32613, 32767};   /* 32768 * (i/127)^0.6: GHOST reaches far from the first turn */
+static const uint16_t SGQ[NST] = {284, 465, 855, 484, 465, 465, 465, 465, 465, 136, 525, 465, 465, 465, 465, 465, 465, 465, 231, 236, 465, 3025, 465, 465, 302, 236, 465, 1376, 515, 136, 1543, 518, 593, 395, 256, 456, 173, 760, 529, 465};   /* so that every station is as loud as the others (x256) */
 
 static uint32_t r_seed = 1u;
 static uint32_t rnd32(void) { r_seed = r_seed * 1664525u + 1013904223u; return r_seed; }
@@ -361,6 +390,8 @@ static struct {
     uint32_t jbv[4], jsv[4];
     /* 18 truck horn, 24 busy tone, 25 ambulance, 27 knock */
     uint32_t thf, thk, thp[3], t19, bz1, bz2, abc, aph; int32_t the, thl, dz, k1;
+    /* 30 heart monitor, 31 car alarm, 32 crossing, 34 modem, 35 phone, 36 alarm clock, 37 smoke detector, 38 red alert */
+    uint32_t xp1, xp2, xp3;
     /* 20 typewriter, 21 clock, 22 wind, 23 neon, and the old speaker */
     uint32_t twn, twt, twl, twd, twr, twp, twdp, twm, wn1, wn2, wn3, nn1, nn2, nfn, nft; int32_t twe, twf, twg, xt1, wnfc, cke; svf_t wnd, vf, vg;
     /* 19 morse */
@@ -740,6 +771,78 @@ static int32_t station4(uint32_t ty)             /* 24 a busy tone, 25 an ambula
             }
         }
         break; }
+    case 30: {                                  /* a heart monitor: one clean beep, slowly, again and again */
+        uint32_t hb = n % 40572u;
+        if (hb < 5733u) {
+            int32_t e1 = (int32_t)(hb * 186u), e2 = (int32_t)((5733u - hb) * 74u), e = e1 < e2 ? e1 : e2;
+            if (e > 32767) e = 32767;
+            y = (int32_t)(((int64_t)sn(hb * HZP(1000)) * e >> 15) * 4800 >> 15);
+        }
+        break; }
+    case 31: {                                  /* a car alarm: fast sweeps, then two notes, then silence (13 s) */
+        uint32_t ac = n % 573300u, af = 0;
+        if (ac < 198450u) af = 750u * 256u + (800u * (((ac * 6u) % 44100u) * 32768u / 44100u) >> 7);
+        else if (ac < 352800u) af = (((ac * 7u) % 44100u) < 22050u ? 900u : 1300u) * 256u;
+        if (af) { R.xp1 += hz8p(af); y = sn(R.xp1) > -6554 ? 2600 : -2600; }
+        break; }
+    case 32: {                                  /* a pedestrian crossing: quick ticks for a while, then nothing (11 s) */
+        uint32_t pc = n % 485100u, pt = pc % 11025u;
+        if (pc < 264600u && pt < 1985u) {
+            int32_t e1 = (int32_t)(pt * 371u), e2 = (int32_t)((1985u - pt) * 186u), e = e1 < e2 ? e1 : e2;
+            if (e > 32767) e = 32767;
+            y = (int32_t)(((int64_t)sn(pt * HZP(2100)) * e >> 15) * 5000 >> 15);
+        }
+        break; }
+    case 34: {                                  /* a modem shaking hands: tones, then a rough screech (12 s) */
+        uint32_t mc = n % 529200u, mf = 0u;
+        static const uint16_t MT[4] = {1300, 2100, 980, 1650};
+        if (mc < 70560u) mf = 2100u * 256u;
+        else if (mc >= 97020u && mc < 176400u) mf = (uint32_t)MT[((mc - 97020u) / 5292u) & 3u] * 256u;
+        else if (mc >= 176400u && mc < 396900u) {
+            uint32_t h1 = ((mc / 735u) * 2654435761u) >> 24, h2 = ((mc / 4900u) * 2246822519u) >> 24;
+            mf = 1200u * 256u + (((307200u * h1) >> 8) * h2 >> 8);
+        }
+        if (mf) { R.xp1 += hz8p(mf); y = (sn(R.xp1) * (mc >= 176400u ? 3200 : 3800)) >> 15; }
+        break; }
+    case 35: {                                  /* an old telephone ringing: two bursts of bell, a pause (3 s) */
+        uint32_t m3 = n % 132300u;
+        if (m3 < 17640u || (m3 >= 26460u && m3 < 44100u)) {
+            uint32_t ld = m3 < 17640u ? m3 : m3 - 26460u, le = (m3 < 17640u ? 17640u : 44100u - 26460u) - ld;
+            int32_t e1 = (int32_t)(ld * 110u), e2 = (int32_t)(le * 110u), e = e1 < e2 ? e1 : e2, am;
+            if (e > 32767) e = 32767;
+            R.xp1 += HZP(1950); R.xp2 += HZP(25); R.xp3 += HZP(2480);
+            am = (32768 + sn(R.xp2)) >> 1;
+            y = (int32_t)(((int64_t)(((sn(R.xp1) + sn(R.xp3)) >> 1) * (int64_t)am >> 15) * e >> 15) * 6200 >> 15);
+        }
+        break; }
+    case 36: {                                  /* an alarm clock: four beeps, a pause, again (1.2 s) */
+        uint32_t m4 = n % 52920u, bm = m4 % 6174u;
+        if (m4 < 24696u && bm < 3087u) {
+            int32_t e1 = (int32_t)(bm * 330u), e2 = (int32_t)((3087u - bm) * 330u), e = e1 < e2 ? e1 : e2;
+            if (e > 32767) e = 32767;
+            R.xp1 += HZP(2400);
+            y = (int32_t)(((int64_t)(sn(R.xp1) > 0 ? 3000 : -3000) * e) >> 15);
+        }
+        break; }
+    case 37: {                                  /* a smoke detector: three long shrill beeps, a pause (4.5 s) */
+        uint32_t m5 = n % 198450u;
+        if (m5 < 132300u && (m5 % 44100u) < 22050u) {
+            uint32_t ld = m5 % 44100u;
+            int32_t e1 = (int32_t)(ld * 220u), e2 = (int32_t)((22050u - ld) * 220u), e = e1 < e2 ? e1 : e2;
+            if (e > 32767) e = 32767;
+            R.xp1 += HZP(3100);
+            y = (int32_t)(((int64_t)(((sn(R.xp1) * 3) >> 2) + (sn(R.xp1 * 2u) >> 2)) * 3600 >> 15) * e >> 15);
+        }
+        break; }
+    case 38: {                                  /* a red alert: a klaxon that whoops up, again and again (1 s) */
+        uint32_t m6 = n % 44100u;
+        if (m6 < 30870u) {
+            int32_t e1 = (int32_t)(m6 * 90u), e2 = (int32_t)((30870u - m6) * 40u), e = e1 < e2 ? e1 : e2;
+            if (e > 32767) e = 32767;
+            R.xp1 += hz8p(450u * 256u + (550u * 256u * (m6 * 1024u / 30870u) >> 10));
+            y = (int32_t)(((int64_t)((sn(R.xp1) + (sn(R.xp1 * 2u) >> 1) + (sn(R.xp1 * 3u) >> 2)) * 3200 >> 15) * e) >> 15);
+        }
+        break; }
     }
     return y;
 }
@@ -875,8 +978,8 @@ static void sig_roll(void)                      /* "power on": four stations out
         for (i = 0; i < 4u; i++) p[i] = 4 * (8 + (int32_t)(rnd16() * 112u >> 16));      /* every station sits on a detent of the knob */
         for (i = 1; i < 4u; i++) for (j = i; j > 0 && p[j - 1] > p[j]; j--) { a = p[j]; p[j] = p[j - 1]; p[j - 1] = a; }
     } while ((p[1] - p[0] < 100 || p[2] - p[1] < 100 || p[3] - p[2] < 100) && ++tries < 2000u);
-    { static const uint8_t SC[8] = {0, 3, 10, 19, 24, 25, 29, 33}; for (i = 0; i < 8u; i++) c[i] = SC[i]; }   /* phone, sonar, police, morse, busy tone, ambulance, air-raid siren, a far ringing tone: the eight validated sounds */
-    for (i = 7u; i > 0; i--) { j = rnd16() * (i + 1u) >> 16; tmp = c[i]; c[i] = c[j]; c[j] = tmp; }
+    { static const uint8_t SC[NPOOL] = {0, 3, 10, 19, 24, 25, 29, 33, 28, 30, 31, 32, 34, 35, 36, 37, 38}; for (i = 0; i < NPOOL; i++) c[i] = SC[i]; }   /* the eight validated sounds (phone, sonar, police, morse, busy tone, ambulance, air-raid siren, a far ringing tone), then nine more to try: doorbell, heart monitor, car alarm, crossing, modem, old telephone, alarm clock, smoke detector, red alert */
+    for (i = NPOOL - 1u; i > 0; i--) { j = rnd16() * (i + 1u) >> 16; tmp = c[i]; c[i] = c[j]; c[j] = tmp; }
     for (i = 0; i < 4u; i++) { R.pos[i] = p[i]; R.cont[i] = c[i]; }
     for (i = 0; i < 8u; i++) R.dig[i] = (uint8_t)(rnd16() * 10u >> 16);                             /* a new number to dial */
     R.alow = (int32_t)rr(205, 333);
@@ -913,13 +1016,14 @@ static void sig_roll(void)                      /* "power on": four stations out
 
 static int32_t sig_voice(void)
 {
-        int32_t nz = (int32_t)rnd32() >> 17, x, sig = 0, gh = (int32_t)P[42];
+        int32_t nz = (int32_t)rnd32() >> 17, x, sig = 0, nk = (int32_t)P[43];
     uint32_t k, ty;
     R.n++;
     if ((R.n & 31u) == 0u || R.n == 1u) {                              /* every 32 frames: where is the dial, which station is near */
-        int32_t fn = (int32_t)P[41], cl = 9830 + (22938 * fn) / 127, dial, best = -1, a1m = 0, a2m = 0, dist = 99999, near, ad, aw;
+        int32_t fn = (int32_t)P[41], cl = 22938 + (9830 * fn) / 127, dial, best = -1, a1m = 0, a2m = 0, dist = 99999, near, ad, aw;
         uint32_t wp;
-        dial = (int32_t)P[40] * 4 * 256 + ((384 * sn(R.n * 4870u)) >> 15);                       /* a little drift: 1.5 units at 0.05 Hz */
+        dial = (int32_t)P[40] * 4 * 256 + ((384 * sn(R.n * 4870u)) >> 15)                       /* a little drift: 1.5 units at 0.05 Hz */
+               + (int32_t)((((int64_t)sn(R.n * 13345u) * 5 + (int64_t)sn(R.n * 28245u) * 3) * ((int32_t)P[42] * 7680 / 127)) >> 18);   /* DRIFT: the dial wanders off the station, up to 30 units */
         for (k = 0; k < 4u; k++) {
             int32_t D = dial - R.pos[k] * 256, aD = D < 0 ? -D : D, a1 = 0, a2 = 0;
             if (aD < 25600) {
@@ -947,52 +1051,21 @@ static int32_t sig_voice(void)
     R.wp += HZP(R.wf);
     x = (int32_t)(((int64_t)sn(R.wp) * R.aw >> 15) * 3600 >> 15);                                    /* the squeal falls as you get close, and stops on the station */
     svf(&R.sv, nz, R.fcs, 7000);
-    x += (int32_t)(((int64_t)((R.sv.band * 5) / 256 + (nz * 13) / 256) * (32768 - ((R.near * 26214) >> 15))) >> 15);      /* static, which clears near a station */
+    x += (int32_t)(((int64_t)(((R.sv.band * 5) / 256 + (nz * 13) / 256) * (256 + nk * 2816 / 127) >> 8) * (32768 - (((R.near * 26214) >> 15) * (127 - nk) / 127)) >> 15));      /* static, which clears near a station. NOISE: more of it, and it stops clearing */
     if (R.pn > 328 || R.pw > 656) {
-        int32_t cl = 9830 + (22938 * (int32_t)P[41]) / 127;
+        int32_t cl = 22938 + (9830 * (int32_t)P[41]) / 127;
         int32_t g = ((R.pw * 3932) >> 15) + (int32_t)(((int64_t)((R.pn * 28836) >> 15) * cl) >> 15);
         ty = R.cont[R.bk];
         sig = ty < 6u ? station(ty) : ty < 14u ? station2(ty) : ty < 24u ? station3(ty) : station4(ty);
         if (!(ty == 6u || (ty >= 15u && ty <= 17u))) {                  /* the same old speaker for every scene: narrow, a little crackle */
             int32_t vl;
             if (rnd16() < 7u) sig += (((int32_t)rnd16() - 32768) * 7000) >> 16;
-            vl = svf(&R.vf, sig, 11000, 5000); sig = ty == 18u ? vl : vl - svf(&R.vg, vl, 1700, 5000); sig = (sig * 21) >> 4;
+            vl = svf(&R.vf, sig, 11000, 5000); sig = (ty == 18u || ty == 38u) ? vl : vl - svf(&R.vg, vl, 1700, 5000); sig = (sig * 21) >> 4;
         }
         sig = (int32_t)(((int64_t)sig * SGQ[ty] >> 8) * g >> 15);
         x += sig;
     }
-    if (gh) {                                                           /* GHOST: the further you push it, the less the radio is a radio */
-        int32_t g = GH06[gh], dl, i0, f2, yy, e1, e2, rg, cs;
-        static uint32_t p37, p51, p11;
-        p37 += hz8p(95u); p51 += hz8p(1306u); p11 += hz8p(28u);
-        { int64_t w = (int64_t)sn(p37) * (280 * 256) + (int64_t)sn(p51) * (8 * 256);
-          dl = 400 * 256 + (int32_t)(((w >> 15) * g) >> 15); }                                           /* the delay in 1/256 samples: the tape wobbles */
-        i0 = dl >> 8; f2 = dl & 255;
-        gd[R.gw & 2047] = (int16_t)(x > 32767 ? 32767 : x < -32767 ? -32767 : x);
-        yy = gd[(R.gw - i0) & 2047] + (((gd[(R.gw - i0 - 1) & 2047] - gd[(R.gw - i0) & 2047]) * f2) >> 8); R.gw++;
-        x = (int32_t)(((int64_t)x * (32768 - g) + (int64_t)yy * g) >> 15);
-        R.rp += hz8p((60u + (uint32_t)((340 * (16384 + (sn(p11) >> 1))) >> 15)) * 256u);
-        rg = (int32_t)(((int64_t)((int64_t)g * g >> 15) * g >> 15) * 24576 >> 15);                                        /* 0.75 g^2 */
-        x = (int32_t)(((int64_t)x * (32768 - rg)) >> 15) + (int32_t)(((((int64_t)x * sn(R.rp) >> 15) * rg >> 15) * 45875) >> 15);   /* a metal voice that wanders */
-        e1 = gg1[R.gi1]; e2 = gg2[R.gi2];                                                            /* two echoes in an empty room */
-        { int32_t w1 = x + (int32_t)(((int64_t)e1 * 18022 >> 15) * g >> 15), w2 = x + (int32_t)(((int64_t)e2 * 16384 >> 15) * g >> 15);
-          gg1[R.gi1] = (int16_t)(w1 > 32767 ? 32767 : w1 < -32767 ? -32767 : w1); gg2[R.gi2] = (int16_t)(w2 > 32767 ? 32767 : w2 < -32767 ? -32767 : w2); }
-        if (++R.gi1 >= 6615) R.gi1 = 0;
-        if (++R.gi2 >= 10143) R.gi2 = 0;
-        x += (int32_t)(((int64_t)((e1 * 19661 >> 15) + (e2 * 16384 >> 15)) * g) >> 15);
-        if (R.cn <= 0 && rnd32() < (uint32_t)g * 1783u / 1000u) {                                            /* little signals from somewhere else */
-            R.cn = (int32_t)MS(50) + (int32_t)(rnd16() * MS(200) >> 16); R.cl = R.cn; R.cf = rr(1500, 5000) << 8;
-            cs = 16384 + (int32_t)(rnd16() * 32768u >> 16); R.cs = rnd16() < 32768u ? -cs : cs; R.cstep = 0x80000000u / (uint32_t)R.cl; R.cprog = 0;
-        }
-        if (R.cn > 0) {
-            int32_t pr = (int32_t)(R.cprog >> 16);                                                  /* 0 .. 1 over the chirp (Q15) */
-            uint32_t finc = (uint32_t)(((uint64_t)hz8p(R.cf) * (uint32_t)(65536 + ((R.cs * pr) >> 14))) >> 16);
-            R.cph += finc; R.cprog += R.cstep; if (pr > 32767) pr = 32767;
-            x += (int32_t)((((int64_t)sn(R.cph) * sn((uint32_t)pr << 16) >> 15) * g >> 15) * 2200 >> 15);
-            R.cn--;
-        }
-    }
-    return soft(x);
+    return x > 32767 ? 32767 : x < -32767 ? -32767 : x;                 /* no saturation: the radio is limited later, by a gain */
 }
 
 
@@ -1124,14 +1197,14 @@ static int32_t x_sample(void)
 static void app_audio(int32_t *out, uint32_t n)
 {
     static uint32_t blk, dfb = 14746u, q_seen, qr_seen, h_seen, h_tail, elen = 6014u, eglen = 3608u;
-    static int32_t ds0, ds1, ds3, ds4, dwet = 256;
+    static int32_t ds0, ds1, ds3, ds4, dwet = 256, pdep, prum;
+    static uint32_t pr;
     uint32_t i, t0 = fm1_ticks();
     for (i = 0; i < n; i++) {
         int32_t ya, yb, yq, ys, yd, yf;
         if (blk == 0) {                         /* every 32 frames: envelopes, filter coefficients */
-            int32_t idx, bar_fr, fb, mx;
-            uint32_t bar;
-            lead_block(&LA, 0); lead_block(&LQ, 48); kit_block();
+            int32_t idx, mx;
+            lead_block(&LA, 0); lead_block(&LQ, 48);
             q_gate = ((uint32_t)step_len * (762u + 14u * P[49])) / 1270u;           /* SEQ STRETCH */
             gate_len = ((uint32_t)step_len * (762u + 14u * P[1])) / 1270u;          /* ARP STRETCH: the gate stays open 0.6 .. 2 steps */
             LA.incb = LA.inc_t;
@@ -1139,12 +1212,20 @@ static void app_audio(int32_t *out, uint32_t n)
             if (B.seen != b_trig) B.seen = b_trig;
             idx = (int32_t)P[12] + (int32_t)(P[17] * 22u / 100u); if (idx > 127) idx = 127;
             B.f = CUT_F[idx]; B.q = resq(P[13]);
-            bar = 16u * step_len;                                          /* WARP: at the top of each bar the pitch dives, then climbs back */
-            bar_fr = 32767 - (int32_t)((uint32_t)(wph >> 8) * 32767u / (bar >> 8));
-            if (bar_fr < 0) bar_fr = 0;
-            fb = 32768 - (((bar_fr * ez(P[19])) >> 7) >> 1);
-            B.incb = (uint32_t)(((uint64_t)b_inc * (uint32_t)fb) >> 15);
-            B.inc2 = B.incb + (uint32_t)(((uint64_t)B.incb * 24u) >> 11);                    /* the second saw, a little out of tune */
+            {                                                              /* PULSE: a throb that is there from the first notch, deep, and that runs away: faster, deeper, shakier, with a rumble, until it seems about to break */
+                uint32_t pk = P[15] > 127u ? 127u : P[15], qq = pk * pk / 127u, pp = B.pp >> 17;
+                int32_t ru = (int32_t)(900u + 13100u * qq / 127u), jt, e;      /* the rate, in 1/1000 Hz: 0.9 Hz at first, 14 Hz at the top, most of the climb at the end */
+                jt = (int32_t)(((int64_t)((int32_t)rnd16() - 32768) * (int32_t)((uint32_t)(ru / 10) * pk / 127u)) >> 15);   /* it wanders: up to 10 % at the top */
+                B.jit += (jt - B.jit) >> 6;
+                pr = (uint32_t)(ru + B.jit) * 97391u / 1000u;
+                pdep = pk ? (int32_t)(16384u + 15700u * pk / 127u) : 0;       /* the depth: half at once, nearly all at the top */
+                e = (int32_t)(((int64_t)(32767u - pp) * (int64_t)(32767u - pp)) >> 15);
+                B.sag = (int32_t)(((int64_t)e * (int32_t)(pk * 3000u / 127u)) >> 15);                 /* on every boom the pitch sags (up to 9 %) and climbs back */
+                prum = (int32_t)(qq * pk / 127u);
+            }
+            B.incb = (uint32_t)(((uint64_t)b_inc * (uint32_t)(32768 - B.sag)) >> 15);
+            B.inc2 = B.incb + (uint32_t)(((uint64_t)B.incb * 24u) >> 11);            /* the second saw: a hair sharp, always */
+            B.inc3 = B.incb;
             dlen = 3u * step_len;                                          /* the delay: a dotted eighth (halved until it fits, at very slow tempi) */
             while (dlen > 32000u) dlen >>= 1;
             {
@@ -1188,19 +1269,20 @@ static void app_audio(int32_t *out, uint32_t n)
             LQ.tick = 0; if (!q_hold) LQ.gate = 0; LQ.pos = 0; q_cur = 255u; q_idx = 255u;
         }
 
-        ya = lead_sample(&LA, 0, VOL[0]);
+        ya = arp_limit(lead_sample(&LA, 0, VOL[0]));
         yq = lead_sample(&LQ, 48, VOL[5]);
 
         /* WAV */
         yb = 0;
         {
-            int32_t g = b_gate, in, lb;
+            int32_t g = b_gate, in, lb, sbt = 0;
             if (B.amp < g) { B.amp += 600; if (B.amp > g) B.amp = g; }
             else if (B.amp > g) { B.amp -= 10; if (B.amp < g) B.amp = g; }
             if (B.amp) {
                 uint32_t c1, c2;
                 int32_t fmb = ez(P[20]);
-                B.ph1 += B.incb; B.ph2 += B.inc2; B.ph3 += B.incb;
+                B.ph1 += B.incb; B.ph2 += B.inc2; B.ph3 += B.inc3;
+                B.ph8 += B.incb >> 1; sbt = (int32_t)B.ph8 >> 16; sbt = (sbt < 0 ? -sbt : sbt) - 16384;      /* a triangle an octave below */
                 c1 = B.ph1; c2 = B.ph2;
                 if (fmb) {                                                /* FM */
                     int32_t x;
@@ -1213,18 +1295,23 @@ static void app_audio(int32_t *out, uint32_t n)
                 in = ((((int32_t)c1 >> 16) + ((int32_t)c2 >> 16)) * 3) >> 3;
                 in += (int32_t)B.ph3 < 0 ? 12000 : -12000;
                 lb = svf(&B.sv2, svf(&B.sv, in, B.f, 36000), B.f, B.q);
-                if (P[14]) {                                              /* FOLD, deep: the wave folds back on itself, an octave below joins it, and the top is rounded off */
-                    int32_t fz = (lb * (256 + (int32_t)(P[14] * 640u / 127u))) >> 8, sb;
-                    lb = (((fz - 16384) & 65535) - 32768); lb = (lb < 0 ? -lb : lb) - 16384;
-                    B.ph8 += B.incb >> 1; sb = (int32_t)B.ph8 >> 16; sb = (sb < 0 ? -sb : sb) - 16384;
-                    lb += (sb * (int32_t)P[14]) >> 8;
-                    B.flp += ((lb - B.flp) * (256 - (int32_t)(P[14] * 196u / 127u))) >> 8; lb = B.flp;
+                if (P[14]) {                                              /* FOLD: the wave is folded back on itself, again and again as the knob goes up (a metallic, hollow growl) */
+                    uint32_t f = P[14] > 127u ? 127u : P[14];
+                    int32_t z = (int32_t)(((int64_t)lb * (int32_t)(320u + f * 1250u / 127u)) >> 8);
+                    z = ((z - 32768) & 131071) - 65536; z = (z < 0 ? -z : z) - 32768;
+                    lb = (int32_t)(((int64_t)z * FOLDC(f)) >> 15);
                 }
-                if (P[15]) {                                              /* RING: multiplied by a second, out-of-tune wave: metal, a spaceship, then pieces */
-                    int32_t x;
-                    B.ph5 += (uint32_t)(((uint64_t)B.incb * (141u + P[15]) * 5243u) >> 19);   /* x (1.41 + RING / 100) */
-                    x = (int32_t)B.ph5 >> 16; x = (x < 0 ? -x : x) - 16384;
-                    lb = lb + (((((int32_t)(((int64_t)lb * x) >> 14)) - lb) * (int32_t)P[15]) >> 7);
+                if (pdep) {                                               /* PULSE: boom, boom, boom: every beat is a deep thump, the drone sinks between them */
+                    int32_t e, gn, nzr = (int32_t)rnd32() >> 17;
+                    uint32_t p;
+                    B.pp += pr; p = B.pp >> 17;
+                    e = (int32_t)(((int64_t)(32767u - p) * (int64_t)(32767u - p)) >> 15);
+                    gn = 32768 - (int32_t)(((int64_t)(32768 - e) * pdep) >> 15);
+                    lb = (int32_t)(((int64_t)lb * gn) >> 15);
+                    lb += (int32_t)(((((int64_t)sbt * e) >> 15) * (pdep + (pdep >> 1))) >> 15);
+                    B.rl += ((nzr - B.rl) * 800) >> 15;                   /* the rumble of the engines: low noise, heavier and heavier */
+                    lb += (B.rl * prum) >> 5;
+                    lb = (int32_t)(((int64_t)lb * PULSEC(pdep)) >> 15);
                 }
                 {                                                         /* DRIVE: a smooth tanh saturation, a little warmer (darker) as it goes up */
                     uint32_t dg = P[17] > 127u ? 127u : P[17], at, ti;
@@ -1233,6 +1320,11 @@ static void app_audio(int32_t *out, uint32_t n)
                     if (at >= 131072u) th = 32767; else { ti = at >> 9; th = TANHQ[ti] + (((TANHQ[ti + 1u] - TANHQ[ti]) * (int32_t)(at & 511u)) >> 9); }
                     yb = (th * 29491) >> 15; if (t < 0) yb = -yb;
                     B.dlp += ((yb - B.dlp) * (256 - (int32_t)(dg * 154u / 127u))) >> 8; yb = B.dlp;
+                    if (dg > 64u) {                                   /* the top of DRIVE: the engines rumble (a sub octave) and the whole thing swells */
+                        uint32_t ex = dg - 64u;
+                        yb += (int32_t)(((int64_t)sbt * (int64_t)ex * 1) >> 7);
+                        yb = (int32_t)(((int64_t)yb * (int32_t)(256u + ex * 1u)) >> 8);
+                    }
                     B.fx.bass = 1u;
                     yb = fx_run(&B.fx, yb, (int32_t)P[23]);
                     B.clp += ((yb - B.clp) * (256 - (int32_t)(ez(P[23]) * 190u >> 7))) >> 8; yb = B.clp;   /* the crush of the bass stays deep: its harsh top is rounded off */
@@ -1244,13 +1336,12 @@ static void app_audio(int32_t *out, uint32_t n)
 
         /* FM1 */
         ys = 0;
-        if (!s_off) { ys = sig_voice(); ys = fx_run(&FXS, ys, (int32_t)P[43]); ys = (ys * (int32_t)(VOL[4] + 1u) * 40) >> 9; }
+        if (!s_off) { ys = sig_voice(); ys = limit(&lim_s, (ys * (int32_t)(VOL[4] + 1u) * RADIO_K) >> 9, RADIO_LIM); }
 
-        yd = (drums() * 5) >> 2;                                       /* the kit: louder, but its peaks are tamed (no clipping) */
-        if (yd > 44000) yd = 44000 + ((yd - 44000) >> 2); else if (yd < -44000) yd = -44000 + ((yd + 44000) >> 2);
+        yd = 0;                                                 /* no kit any more: ARP, WAV and the radio */
         yf = (x_sample() * 87) >> 6;
         {
-            int32_t wl, wr, vl, vr, a0, a1, ml, mr, dry = (int32_t)(((int64_t)((ya * 243 + yb * 90 + ys * 154 + yq * 179) >> 7) * (32768 - d_duck)) >> 15) + yd + yf;
+            int32_t wl, wr, vl, vr, a0, a1, ml, mr, dry = (int32_t)(((int64_t)((ya * 243 + yb * 125 + ys * 154 + yq * 179) >> 7) * (32768 - d_duck)) >> 15) + yd + yf;
             uint32_t dt = dlen << 8, di, df;
             if (dq < dt) { dq += 64u; if (dq > dt) dq = dt; }              /* a new tempo: the echo slides to its new time (up to 25% pitch bend) */
             else if (dq > dt) { dq -= 64u; if (dq < dt) dq = dt; }
@@ -1263,8 +1354,8 @@ static void app_audio(int32_t *out, uint32_t n)
             dlpr += ((wr - dlpr) * 3) >> 2;
             vl = ((ya * ds0 + yb * ds1 + yq * ds3 + yd * ds4) >> 7) + ((dlpr * (int32_t)dfb) >> 15);
             vr = (dlpl * (int32_t)dfb) >> 15;
-            dl[dpos & DMASK] = (int16_t)soft(vl);                          /* soft: past 100% it rings on and on without exploding */
-            dr[dpos & DMASK] = (int16_t)soft(vr);
+            dl[dpos & DMASK] = (int16_t)tclip(limit(&lim_l, vl, DLY_LIM));        /* the echoes are held under their ceiling by a gain, then (never reached) rounded off past 24000 */
+            dr[dpos & DMASK] = (int16_t)tclip(limit(&lim_r, vr, DLY_LIM));
             dpos++;
             if (sp_hs || sp_cr || sp_fa || sp_wa || sp_ba) {
                 int32_t nz, w, q;
@@ -1277,10 +1368,10 @@ static void app_audio(int32_t *out, uint32_t n)
                 sp_bp += sp_bi; q = (int32_t)sp_bp >> 16; q = soft((q < 0 ? -q : q) * 2 - 32768);
                 dry += ((nz * (int32_t)sp_hs) >> 8) + ((nz * sp_ce) >> 14) + ((nz * (int32_t)sp_fa) >> 14) + w + ((q * (int32_t)sp_ba) >> 15);
             }
-            ml = ((dry + (((wl + (wl >> 1)) * dwet) >> 8)) * 11) >> 5;
-            mr = ((dry + (((wr + (wr >> 1)) * dwet) >> 8)) * 11) >> 5;
-            if (ml > 24000) ml = 24000 + ((ml - 24000) >> 1); else if (ml < -24000) ml = -24000 - ((-24000 - ml) >> 1);   /* a soft knee above 24000 */
-            if (mr > 24000) mr = 24000 + ((mr - 24000) >> 1); else if (mr < -24000) mr = -24000 - ((-24000 - mr) >> 1);
+            ml = ((dry + (((wl + (wl >> 1)) * dwet) >> 8)) * 16) >> 5;
+            mr = ((dry + (((wr + (wr >> 1)) * dwet) >> 8)) * 16) >> 5;
+            if (ml > 22000) ml = 22000 + ((ml - 22000) >> 2); else if (ml < -22000) ml = -22000 - ((-22000 - ml) >> 2);   /* a soft knee above 22000 */
+            if (mr > 22000) mr = 22000 + ((mr - 22000) >> 2); else if (mr < -22000) mr = -22000 - ((-22000 - mr) >> 2);
             if (ml > 32767) ml = 32767; else if (ml < -32767) ml = -32767;
             if (mr > 32767) mr = 32767; else if (mr < -32767) mr = -32767;
             out[2u * i] += ml;
@@ -1498,15 +1589,14 @@ static void draw_battery(uint32_t raw)          /* top right: a battery with fou
 #define C_SEQ RGB(255, 184, 112)
 #define C_SFX RGB(111, 227, 224)
 static const uint16_t VCOL[7] = {C_ARP, C_WAV, C_KIT, C_VOX, C_FM1, C_SEQ, C_SFX};
-static const uint8_t VORD[4] = {0, 1, 2, 4};                    /* the PRESETS knob, left to right: ARP WAV KIT A09 */
-static const uint8_t PGN[7] = {1, 1, 1, 1, 1, 1, 1};               /* pages per voice: one, the FX key does nothing */
-static const uint8_t UIMAP[7][2][4] = {{{0, 6, 5, 31}}, {{17, 19, 20, 14}}, {{24, 25, 26, 27}}, {{36, 37, 38, 39}}, {{40, 41, 42, 43}}, {{48, 50, 51, 54}}, {{60, 61, 62, 63}}};
+static const uint8_t VORD[3] = {0, 1, 4};                       /* the PRESETS knob, left to right: ARP WAV A09 */
+static const uint8_t UIMAP[7][2][4] = {{{6, 5, 0, 31}}, {{17, 20, 14, 15}}, {{24, 25, 26, 27}}, {{36, 37, 38, 39}}, {{40, 41, 42, 43}}, {{48, 50, 51, 54}}, {{60, 61, 62, 63}}};
 static const char *const UINAME[7][2][4] = {
-    {{"CUTOFF", "DELAY", "RANGE", "RUSH"}, {"", "", "", ""}},
-    {{"DRIVE", "WARP", "FM", "FOLD"}, {"", "", "", ""}},
+    {{"DELAY", "RANGE", "CUTOFF", "RUSH"}, {"", "", "", ""}},
+    {{"DRIVE", "FM", "FOLD", "PULSE"}, {"", "", "", ""}},
     {{"KICK", "SNARE", "HAT", "CRUSH"}, {"", "", "", ""}},
     {{"VOWEL", "ROBOT", "DELAY", "CRUSH"}, {"", "", "", ""}},
-    {{"TUNE", "FINE", "GHOST", "CRUSH"}, {"", "", "", ""}},
+    {{"TUNE", "FINE", "DRIFT", "NOISE"}, {"", "", "", ""}},
     {{"CUTOFF", "ENV MOD", "DECAY", "DELAY"}, {"", "", "", ""}},
     {{"GHOST", "ALIEN", "DELAY", "CRUSH"}, {"", "", "", ""}}};
 
@@ -1664,11 +1754,10 @@ static void app_main(void)
         if (b & (1u << BTN_SEL)) {
             if (tg == 5u) { if (sqn) sqn--; sqc = sqn % 16u; if (!sqn) sqrun = 0; }   /* SEQ: delete the last step */
         }
-        if (b & (1u << BTN_FX)) set.page = (uint8_t)((set.page + 1u) % PGN[tg]);
 
-        if ((e = fm1_enc_take(ENC_PRESETS)) != 0) {   /* left to right: ARP WAV KIT A09 */
+        if ((e = fm1_enc_take(ENC_PRESETS)) != 0) {   /* left to right: ARP WAV A09 */
             int32_t t = (int32_t)set.pos + (e > 0 ? 1 : -1);
-            t = t < 0 ? 0 : t > 3 ? 3 : t;
+            t = t < 0 ? 0 : t > 2 ? 2 : t;
             if ((uint8_t)t != set.pos) { set.page = 0; q_rec = 0; }      /* every voice starts on page A */
             set.pos = (uint8_t)t; set.tgt = VORD[t]; tg = set.tgt;
         }
@@ -1691,13 +1780,7 @@ static void app_main(void)
         }
         for (k = 0; k < NP; k++) P[k] = set.v[k];
         for (k = 0; k < 7u; k++) VOL[k] = set.vol[k];
-        if ((e = fm1_enc_take(ENC_SELECT)) != 0) {
-            uint8_t *bp = tg == 2u && d_free ? &set.dbpm : &set.bpm;   /* one tempo for all; the kit follows it, unless SEL has let it go */
-            int32_t x = (int32_t)*bp + ((fm1_ms - kt[5] < 90u || e > 1 || e < -1) ? 5 : 1) * e;   /* 1 BPM a click, 5 when you turn fast */
-            kt[5] = fm1_ms;
-            *bp = (uint8_t)(x < 20 ? 20 : x > 200 ? 200 : x);
-            if (tg == 2u && d_free) apply_dtempo(*bp); else { apply_tempo(*bp); if (!d_free) apply_dtempo(*bp); }
-        }
+        (void)fm1_enc_take(ENC_SELECT);                 /* SELECT (the tempo) is not used: the RUSH is the tempo */
 
         for (k = 0; k < 27u; k++) {             /* held keys, the latched chord, the bass key, the SEQ step that plays */
             uint32_t on = (keys >> k & 1u) || (b_gate && k == b_key) || (a_mask >> k & 1u) || (tg == 5u && sqrun && k == q_cur) || 0;
