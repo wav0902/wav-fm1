@@ -108,7 +108,7 @@ static int32_t ez(uint32_t v) { return EZ[v > 127u ? 127u : v]; }   /* every eff
 #define ARP_K0 2000                             /* the ARP's level at the lowest cutoff (x 1/262144, with the voice volume) */
 #define ARP_K1 720                              /* how much quieter it is made as the cutoff opens: as loud open as closed */
 #define ARP_LIM 19000                           /* the ARP's ceiling, before the mix */
-#define RADIO_K 8                               /* the radio's level (x 1/512, with the voice volume) */
+#define RADIO_K 14                              /* the radio's level (x 1/512, with the voice volume) */
 #define RADIO_LIM 40000                         /* the radio's ceiling, before the mix */
 #define DLY_LIM 16000                           /* the echoes' ceiling, inside the delay loop */
 static int32_t lim_g = 32768, lim_l = 32768, lim_r = 32768, lim_s = 32768;
