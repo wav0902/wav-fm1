@@ -77,6 +77,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            build/dinghy-[0-9]*.fwsc   # (the release builds, not the dev ones: dinghy-smk37.fwsc)
+            build/dinghy-[0-9]*.fwsc
             build/SHA256SUMS
           generate_release_notes: true
