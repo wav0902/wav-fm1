@@ -59,8 +59,9 @@ BOARD_PREFIX = {"fm1": "FM-1_908", "smk37": "SMK-37 Pro_99"}   # identity: prefi
 BOARD_DEFS = {"fm1": [], "smk37": ["-DBOARD_SMK37=1"]}
 MODELS = {"pro": "SMK-37 Pro", "elite": "SMK-37 Elite", "mke": "MKE-P37"}   # smk37: one keyboard, three names
 DATA_FAMILY = "DINGHY"              # the SMK store's owner tag (store.h): 1..7 of A-Z 0-9. Your fork: your own
-SCREEN_NAME = "ARP WAV 09"              # the update loader's screen (FM-1, ldr_screen.c): the name and its colour (RGB565)
-SCREEN_COLOUR = 0xFBD7              # neon pink, #FF7AB8
+SCREEN_NAME = "ARP WAV"                 # the update loader's screen (FM-1, ldr_screen.c): the name (one word per line) and the colour of each word (RGB565)
+SCREEN_COLOUR = 0xFBF9              # the first word: pink, #FF7DCD
+SCREEN_COLOUR2 = 0x755F             # the second word: blue, #70AAFF
 PRODUCT = "FM-1_908"                # Dinghy: 99N (OUR_LOADER in the installer wants FM-1_9NN). Your fork: pick your own
 VERSION = None                      # APP_VER for release builds
 
@@ -137,7 +138,7 @@ def build_loader():
     LDR.mkdir(parents=True, exist_ok=True)
     src = FW / "loader"
     flags = [*CFLAGS, *BOARD_DEFS[BOARD], "-Ifirmware/hal", "-Ifirmware/src", f'-DLDR_NAME="{SCREEN_NAME}"',
-             f"-DLDR_COLOUR={SCREEN_COLOUR:#x}u"]
+             f"-DLDR_COLOUR={SCREEN_COLOUR:#x}u", f"-DLDR_COLOUR2={SCREEN_COLOUR2:#x}u"]
     tc_all(("cc", "-c", src / "crt0_ldr.S", "-o", LDR / "crt0_ldr.o"),
            ("cc", *flags, "-c", src / "loader.c", "-o", LDR / "loader.o"))
     elf = LDR / "loader.elf"
