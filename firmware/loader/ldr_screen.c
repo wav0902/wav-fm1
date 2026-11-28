@@ -2,25 +2,33 @@
  * Copyright (C) 2026 zvenson (from OberVave; the Firmware Hub's look)
  * Copyright (C) 2026 illuminus5 (Skiff: the idea, a loader that draws, its 5 x 7 letters and the order of things) */
 /* The update loader's screen (loader.c; tests/ldr_screen_test.c). A unit whose install was cut off comes back to the
- * loader at every power-on and showed a black screen; now it says what it does, in the Firmware Hub's colours:
- *   the firmware's name, big, in its colour, a thin line under it
+ * loader at every power-on and showed a black screen; now it says what it does, in the FirmWare family's look:
+ *   an oscilloscope screen (night blue, a faint grid) with the firmware's name in dot-matrix letters, one word per line
  *   what happens (UPDATE MODE, WRITING, UPDATE FAILED) and what to do, white and grey
  *   20 segments: a light running to and fro while it waits (ldr_anim), the share written while it writes, the percent
  *   (nothing at the foot)
  * Drawn with the loader's own letters (the app area may be half written: never read), before USB starts (USB is
- * polled: the panel's ~0.3 s init would leave the host's enumeration unanswered). FM-1 only (the SMK-37's stays dark).
- * LDR_NAME / LDR_COLOUR: the firmware's name (at most 9 letters at size 4, more get smaller) and colour (RGB565). */
+ * polled: the panel's ~0.3 s init would leave the host's enumeration unanswered): so the name is lit at once.
+ * FM-1 only (the SMK-37's stays dark).
+ * LDR_NAME: the name, one or two words (a space between), at most 3 letters per word at the biggest size.
+ * LDR_COLOUR / LDR_COLOUR2: the first / second word's colour (RGB565). */
 #ifndef LDR_NAME
-#define LDR_NAME "ARP WAV 09"
+#define LDR_NAME "ARP WAV"
 #endif
 #ifndef LDR_COLOUR
-#define LDR_COLOUR 0xFBD7u               /* the neon pink of the titles, #FF7AB8 */
+#define LDR_COLOUR 0xFBF9u               /* the first word, pink #FF7DCD */
 #endif
-#define LDR_BG 0x1082u                   /* the hub's background, #151213 */
-#define LDR_INK 0xEF5Cu                  /* its text, #EFE8E1 */
-#define LDR_SUB 0xA4D2u                  /* its grey, #A39A94 */
-#define LDR_DIM 0x39A6u                  /* a segment off, #3A3435 */
-#define LDR_HUB 0xAB9Du                  /* the hub's lila, #A870E8 */
+#ifndef LDR_COLOUR2
+#define LDR_COLOUR2 0x755Fu              /* the second word, blue #70AAFF */
+#endif
+#define LDR_BG 0x0844u                   /* the night blue ground, #090B20 */
+#define LDR_INK 0xEF5Eu                  /* the text, #E8E8F5 */
+#define LDR_SUB 0x8C97u                  /* the grey, #8E92B8 */
+#define LDR_DIM 0x190Au                  /* a segment off, #1C2150 */
+#define LDR_GRID 0x10A6u                 /* the scope's grid lines */
+#define LDR_AXIS 0x212Au                 /* its centre axes and the edge */
+#define LDR_GHOST 0x10C7u                /* a dot off in the name */
+#define LDR_PANEL 104u                   /* the scope screen's height */
 #define LDR_MIX(a, b) ((((a) >> 11) + ((b) >> 11)) / 2u << 11 | ((((a) >> 5) & 63u) + (((b) >> 5) & 63u)) / 2u << 5 | \
                        (((a) & 31u) + ((b) & 31u)) / 2u)
 #define LDR_TAIL LDR_MIX(LDR_COLOUR, LDR_DIM)   /* the waiting light's afterglow: halfway to a segment off */
@@ -57,7 +65,7 @@ static const uint8_t LDR_FONT[sizeof LDR_CH - 1u][7] = {         /* rows, bit 4 
 #define LDR_SEGS 20u                     /* the segments: 9 px and a 2 px gap, 218 px, centred */
 #define LDR_SEG_W 9u
 #define LDR_SEG_X 11u
-#define LDR_SEG_Y 150u
+#define LDR_SEG_Y 160u
 #define LDR_SEG_H 10u
 
 static uint32_t ldr_missing;                        /* letters drawn as gaps: 0 (ldr_screen_test) */
@@ -91,21 +99,45 @@ static void ldr_text(uint32_t y, uint32_t s, uint16_t c, const char *t)   /* cen
             }
     }
 }
+static void ldr_dots(uint32_t y, uint32_t s, uint16_t c, const char *t, uint32_t n)   /* a word in dots, centred: s px a cell */
+{
+    uint32_t l, r, q, k, x = (240u - (n * 6u - 1u) * s) / 2u;
+    for (l = 0; l < n; l++, x += 6u * s) {
+        for (k = 0; LDR_CH[k] && LDR_CH[k] != t[l]; k++)
+            ;
+        if (!LDR_CH[k]) {
+            ldr_missing += t[l] != ' ';
+            continue;
+        }
+        for (r = 0; r < 7u; r++)
+            for (q = 0; q < 5u; q++)
+                lcd_fill(x + q * s, y + r * s, s - 1u, s - 1u, LDR_FONT[k][r] >> (4u - q) & 1u ? c : LDR_GHOST);
+    }
+}
+static void ldr_scope(void)                         /* the scope screen: faint grid, centre axes, an edge under it */
+{
+    uint32_t g;
+    for (g = 1; g < 8u; g++)
+        lcd_fill(g * 30u, 0, 1, LDR_PANEL, g == 4u ? LDR_AXIS : LDR_GRID);
+    for (g = 1; g < 4u; g++)
+        lcd_fill(0, g * 26u, 240, 1, g == 2u ? LDR_AXIS : LDR_GRID);
+    lcd_fill(0, LDR_PANEL, 240, 1, LDR_AXIS);
+}
 static void ldr_seg(uint32_t i, uint16_t c)
 {
     lcd_fill(LDR_SEG_X + i * (LDR_SEG_W + 2u), LDR_SEG_Y, LDR_SEG_W, LDR_SEG_H, c);
 }
 static void ldr_say(const char *what, const char *sub)   /* the status and what to do */
 {
-    lcd_fill(0, 92, 240, 46, LDR_BG);
-    ldr_text(94, 2, LDR_INK, what);
-    ldr_text(122, 1, LDR_SUB, sub);
+    lcd_fill(0, 110, 240, 44, LDR_BG);
+    ldr_text(114, 2, LDR_INK, what);
+    ldr_text(138, 1, LDR_SUB, sub);
 }
 static void ldr_percent(uint32_t p)                  /* "57%" under the segments; 0xFFFF: none */
 {
     char t[5];
     uint32_t n = 0;
-    lcd_fill(0, 170, 240, 22, LDR_BG);
+    lcd_fill(0, 176, 240, 26, LDR_BG);
     if (p > 100u)
         return;
     if (p >= 100u)
@@ -115,7 +147,7 @@ static void ldr_percent(uint32_t p)                  /* "57%" under the segments
     t[n++] = (char)('0' + p % 10u);
     t[n++] = '%';
     t[n] = 0;
-    ldr_text(170, 3, LDR_INK, t);
+    ldr_text(178, 3, LDR_INK, t);
 }
 
 static uint32_t ldr_lit;                            /* segments lit for the write */
@@ -125,11 +157,21 @@ static uint8_t ldr_idle = 1;                        /* the waiting light runs (n
 static uint32_t ldr_pos, ldr_next;                  /* the waiting light: its segment (0..37, to and fro), its next move */
 static void ldr_screen(void)
 {
-    uint32_t i, s = ldr_len(LDR_NAME) <= 9u ? 4u : ldr_len(LDR_NAME) <= 12u ? 3u : 2u;
+    uint32_t i, n1 = 0, n2 = 0, m, s, y;
+    const char *w2;
     lcd_init();                                     /* (the panel cleared, on) */
     lcd_fill(0, 0, 240, 240, LDR_BG);
-    ldr_text(48u - 7u * s / 2u, s, LDR_COLOUR, LDR_NAME);
-    lcd_fill(60, 76, 120, 2, LDR_COLOUR);
+    ldr_scope();
+    while (LDR_NAME[n1] && LDR_NAME[n1] != ' ')
+        n1++;
+    w2 = LDR_NAME[n1] ? LDR_NAME + n1 + 1u : LDR_NAME + n1;
+    n2 = ldr_len(w2);
+    m = n1 > n2 ? n1 : n2;
+    s = m <= 3u ? 6u : m <= 4u ? 5u : m <= 5u ? 4u : 3u;             /* (the dot: the biggest that fits) */
+    y = n2 ? (LDR_PANEL - 15u * s) / 2u : (LDR_PANEL - 7u * s) / 2u;
+    ldr_dots(y, s, LDR_COLOUR, LDR_NAME, n1);
+    if (n2)
+        ldr_dots(y + 8u * s, s, LDR_COLOUR2, w2, n2);
     ldr_say("UPDATE MODE", "WAITING FOR THE INSTALL");
     for (i = 0; i < LDR_SEGS; i++)
         ldr_seg(i, LDR_DIM);
