@@ -106,7 +106,7 @@ static int palette_only(void)
     for (y = 0; y < 240u; y++)
         for (x = 0; x < 240u; x++) {
             uint16_t c = fb[y][x];
-            if (c != LDR_BG && c != LDR_INK && c != LDR_SUB && c != LDR_DIM && c != LDR_HUB && c != LDR_COLOUR && c != LDR_TAIL)
+            if (c != LDR_BG && c != LDR_INK && c != LDR_SUB && c != LDR_DIM && c != LDR_GRID && c != LDR_AXIS && c != LDR_GHOST && c != LDR_COLOUR && c != LDR_COLOUR2 && c != LDR_TAIL)
                 return 0;
         }
     return 1;
@@ -119,9 +119,10 @@ int main(int argc, char **argv)
     ldr_screen();
     ppm(dir, "ldr_update_mode");
     check("UPDATE MODE: the name in its colour, the status, the hub's address in lila, 20 segments off",
-          count(0, 20, 240, 76, LDR_COLOUR) > 300u && count(0, 92, 240, 112, LDR_INK) > 200u &&
+          count(0, 0, 240, LDR_PANEL, LDR_COLOUR) > 300u && count(0, 0, 240, LDR_PANEL, LDR_COLOUR2) > 300u &&
+          count(0, 110, 240, 134, LDR_INK) > 200u &&
           lit_segs(LDR_DIM) == LDR_SEGS);
-    check("only the screen's colours, the background the hub's", palette_only() && count(0, 0, 240, 10, LDR_BG) == 2400u);
+    check("only the screen's colours, the background the hub's", palette_only() && count(0, 204, 240, 240, LDR_BG) == 36u * 240u);
     for (ms = 0; ms < 60u * 60u; ms += 60u) {        /* an hour of steps: the light goes to and fro, one segment lit */
         ldr_anim(ms);
         i = lit_at();
@@ -139,7 +140,7 @@ int main(int argc, char **argv)
     ldr_bar(total / 2u, total);
     ppm(dir, "ldr_writing");
     check("WRITING at 50 %: 10 segments lit, the rest off, \"50%\" under them, the light stopped",
-          lit_segs(LDR_COLOUR) == 10u && lit_segs(LDR_DIM) == 10u && count(0, 170, 240, 192, LDR_INK) > 100u && !ldr_idle);
+          lit_segs(LDR_COLOUR) == 10u && lit_segs(LDR_DIM) == 10u && count(0, 176, 240, 202, LDR_INK) > 100u && !ldr_idle);
     ldr_anim(99999u);
     check("no waiting light once it writes", lit_segs(LDR_COLOUR) == 10u);
     ldr_bar(total, total);
@@ -149,7 +150,7 @@ int main(int argc, char **argv)
     ldr_failed();
     ppm(dir, "ldr_failed");
     check("UPDATE FAILED: the segments off, no percent, the way out",
-          lit_segs(LDR_DIM) == LDR_SEGS && count(0, 170, 240, 192, LDR_INK) == 0u && count(0, 92, 240, 112, LDR_INK) > 200u);
+          lit_segs(LDR_DIM) == LDR_SEGS && count(0, 176, 240, 202, LDR_INK) == 0u && count(0, 110, 240, 134, LDR_INK) > 200u);
     check("every letter in the loader's font, nothing outside the panel, only the screen's colours",
           !ldr_missing && !outside && palette_only());
     printf("%s\n", bad ? "LDR SCREEN TEST FAILED" : "ldr_screen test passed");
